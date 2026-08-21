@@ -1,6 +1,6 @@
 # Phase 1a: World Skeleton — Grid + One Moving Point
 
-Status: draft, pending review
+Status: approved
 Related: `VISION.md`, `IDEAS.md`
 
 ## What this phase is
@@ -76,6 +76,38 @@ architecture direction:
    Three.js primitive geometries (box/cone/cylinder/icosahedron-style
    shapes) with Three's built-in lighting — no custom shader-writing
    required for this phase.
+
+## Backend file structure
+
+Already scaffolded (empty files, committed to `github.com/decoder3064/madu`):
+
+```
+backend/
+  app/
+    main.py            # FastAPI app, startup/shutdown, route registration
+    core/
+      config.py         # settings: grid size, tick interval — the numbers
+                         # that control how big/fast the simulation is
+    world/
+      grid.py            # Grid schema: dimensions, bounds checking
+      agent.py           # Agent schema: position (later: role, memory)
+      simulation.py       # the tick loop — owns world state, advances it
+                           # each tick; operates on the grid.py/agent.py
+                           # schema, never talks to api/ directly
+    api/
+      websocket.py       # WebSocket endpoint, connection management,
+                          # broadcast — talks to world/ only through main.py
+    persistence/
+      store.py           # in-memory state container now — the seam where
+                          # a real database swaps in later without changing
+                          # any code that reads/writes state
+  tests/
+    test_grid.py
+    test_simulation.py
+```
+
+Frontend has no scaffolded structure yet — out of scope until this backend
+slice works end to end.
 
 ## Testing approach
 
