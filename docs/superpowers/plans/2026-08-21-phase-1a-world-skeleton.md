@@ -20,6 +20,8 @@
 - Renderer is Three.js, not PixiJS/Phaser — low-poly/retro-polygon aesthetic, not pixel art, built from Three's primitive geometries with its built-in lighting (no custom shaders).
 - Camera is perspective (not orthographic).
 - Backend/frontend stay fully separated — frontend never computes state, only renders it.
+- WebSocket broadcasts full agent state every tick (not deltas) — a deliberate choice, not a phase-1a stopgap, since the frontend merges state by id (`mergeAgents`) rather than replacing it wholesale. This means switching the backend to delta broadcasts later, if ever needed at larger agent counts, requires zero frontend changes — the merge behavior is already correct either way.
+- `ConnectionManager.broadcast()` sends to connections sequentially, not concurrently (`asyncio.gather`). Deliberately deferred — it's a same-interface, zero-blast-radius change to make later if concurrent-viewer load ever makes it matter; not worth the complexity now.
 
 ---
 
@@ -54,6 +56,8 @@ frontend/
     App.tsx
     hooks/parseAgentsMessage.ts
     hooks/parseAgentsMessage.test.ts
+    hooks/mergeAgents.ts
+    hooks/mergeAgents.test.ts
     hooks/useAgentPositions.ts
     scene/AgentScene.tsx
 ```
@@ -888,10 +892,13 @@ git commit -m "chore: scaffold Vite + React + TypeScript frontend"
 **Files:**
 - Create: `frontend/src/hooks/parseAgentsMessage.ts`
 - Create: `frontend/src/hooks/parseAgentsMessage.test.ts`
+- Create: `frontend/src/hooks/mergeAgents.ts`
+- Create: `frontend/src/hooks/mergeAgents.test.ts`
 - Create: `frontend/src/hooks/useAgentPositions.ts`
 
 **Interfaces:**
-- Produces: `AgentPosition` type `{ id: string; x: number; y: number }`; `parseAgentsMessage(raw: string): AgentPosition[]` (throws on malformed input); `useAgentPositions(url: string): AgentPosition[]` React hook (returns `[]` until the first message arrives).
+- Produces: `AgentPosition` type `{ id: string; x: number; y: number }`; `parseAgentsMessage(raw: string): AgentPosition[]` (throws on malformed input); `mergeAgents(prev: Map<string, AgentPosition>, incoming: AgentPosition[]): Map<string, AgentPosition>` (upserts by id, never drops an entry just because it's absent from `incoming`); `useAgentPositions(url: string): AgentPosition[]` React hook (returns `[]` until the first message arrives).
+- **Why `mergeAgents` exists:** the backend broadcasts full agent state every tick today, but if it ever switches to sending only-changed agents (deltas) for scale, a naive "replace state with the latest message" would make every agent that didn't move that tick disappear from screen. Merging by id instead of replacing means this hook is correct under both broadcast strategies, so a future backend change to deltas needs zero frontend changes.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -968,33 +975,95 @@ export function parseAgentsMessage(raw: string): AgentPosition[] {
 Run: `npm run test`
 Expected: PASS (5 tests)
 
-- [ ] **Step 5: Write the WebSocket hook (not unit tested — thin wrapper over the browser WebSocket API, verified manually in Task 11)**
+- [ ] **Step 5: Write the failing test for mergeAgents**
+
+```typescript
+// frontend/src/hooks/mergeAgents.test.ts
+import { describe, it, expect } from 'vitest'
+import { mergeAgents } from './mergeAgents'
+
+describe('mergeAgents', () => {
+  it('adds new agents to an empty map', () => {
+    const result = mergeAgents(new Map(), [{ id: 'a1', x: 1, y: 1 }])
+    expect(result.get('a1')).toEqual({ id: 'a1', x: 1, y: 1 })
+  })
+
+  it('updates an existing agent position in place', () => {
+    const prev = new Map([['a1', { id: 'a1', x: 1, y: 1 }]])
+    const result = mergeAgents(prev, [{ id: 'a1', x: 2, y: 1 }])
+    expect(result.get('a1')).toEqual({ id: 'a1', x: 2, y: 1 })
+  })
+
+  it('does not drop an agent that is absent from the incoming list', () => {
+    // This is the regression test for the delta-broadcast trap: an agent
+    // missing from one message must not disappear from state.
+    const prev = new Map([
+      ['a1', { id: 'a1', x: 1, y: 1 }],
+      ['a2', { id: 'a2', x: 5, y: 5 }],
+    ])
+    const result = mergeAgents(prev, [{ id: 'a1', x: 2, y: 1 }])
+    expect(result.get('a2')).toEqual({ id: 'a2', x: 5, y: 5 })
+  })
+})
+```
+
+- [ ] **Step 6: Run test to verify it fails**
+
+Run: `npm run test`
+Expected: FAIL — `mergeAgents.ts` has no exports (file doesn't exist yet).
+
+- [ ] **Step 7: Write minimal implementation**
+
+```typescript
+// frontend/src/hooks/mergeAgents.ts
+import { AgentPosition } from './parseAgentsMessage'
+
+export function mergeAgents(
+  prev: Map<string, AgentPosition>,
+  incoming: AgentPosition[],
+): Map<string, AgentPosition> {
+  const next = new Map(prev)
+  for (const agent of incoming) {
+    next.set(agent.id, agent)
+  }
+  return next
+}
+```
+
+- [ ] **Step 8: Run test to verify it passes**
+
+Run: `npm run test`
+Expected: PASS (3 tests, plus the 5 from Step 4 — 8 total)
+
+- [ ] **Step 9: Write the WebSocket hook (not unit tested — thin wrapper over the browser WebSocket API and the already-tested `mergeAgents`, verified manually in Task 11)**
 
 ```typescript
 // frontend/src/hooks/useAgentPositions.ts
 import { useEffect, useState } from 'react'
 import { parseAgentsMessage, AgentPosition } from './parseAgentsMessage'
+import { mergeAgents } from './mergeAgents'
 
 export function useAgentPositions(url: string): AgentPosition[] {
-  const [agents, setAgents] = useState<AgentPosition[]>([])
+  const [agents, setAgents] = useState<Map<string, AgentPosition>>(new Map())
 
   useEffect(() => {
     const socket = new WebSocket(url)
     socket.onmessage = (event) => {
-      setAgents(parseAgentsMessage(event.data))
+      const incoming = parseAgentsMessage(event.data)
+      setAgents((prev) => mergeAgents(prev, incoming))
     }
     return () => socket.close()
   }, [url])
 
-  return agents
+  return Array.from(agents.values())
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add frontend/src/hooks/parseAgentsMessage.ts frontend/src/hooks/parseAgentsMessage.test.ts frontend/src/hooks/useAgentPositions.ts
-git commit -m "feat: add WebSocket client hook for agent positions list"
+git add frontend/src/hooks/parseAgentsMessage.ts frontend/src/hooks/parseAgentsMessage.test.ts frontend/src/hooks/mergeAgents.ts frontend/src/hooks/mergeAgents.test.ts frontend/src/hooks/useAgentPositions.ts
+git commit -m "feat: add WebSocket client hook that merges agent state by id"
 ```
 
 ---
@@ -1231,3 +1300,4 @@ all already operate on the full collection — none of them need to change.
 - **Spec coverage:** Architecture (backend owns state / frontend renders / WebSocket push) → Tasks 1-11 collectively. Data model (Grid, Agent, discrete 4-directional movement) → Tasks 2, 3, 5. Backend behavior (tick loop, edge-cycling, broadcast) → Tasks 5, 6, 7. Frontend behavior (flat plane, perspective camera, low-poly shape, WebSocket connect, position updates move the shape) → Tasks 8, 9, 10, 11. Testing approach (manual/visual for rendering, unit tests for branching logic) → reflected in every task's test step. Definition of done → Task 11 Step 3. Backend file structure → File Structure section matches the spec, plus `test_agent.py`, `test_store.py`, `test_websocket.py`, `test_main.py`, `requirements.txt`/`pytest.ini` as necessary infrastructure the spec didn't itemize file-by-file. Multi-agent-ready infra (this session's refactor request) → `Agent.id`, `Store`/`Simulation` operating on `list[Agent]`, `{"agents": [...]}` payload shape, and `AgentScene`'s per-id mesh map — verified by `test_tick_advances_every_agent_independently` and Task 10's two-agent manual check, even though only one agent ships.
 - **Placeholder scan:** no TBD/TODO; every step has real code or a real command.
 - **Type consistency:** `Agent.to_dict()` returns `{"id", "x", "y"}` consistently used in `main.py`'s `_agents_payload`. `Store.get_agent(agent_id: str)` / `.set_agent_position(agent_id, x, y)` signatures match between Task 4's definition and Task 5's `Simulation` usage. `Simulation.tick() -> list[Agent]` matches Task 7's `for a in agents` usage. `AgentPosition { id, x, y }` from Task 9 is imported and used as-is in Task 10 and Task 11 without redefinition. `parseAgentsMessage` / `useAgentPositions` naming (plural) used consistently across Tasks 9, 10, 11 — no leftover singular `parseAgentMessage`/`useAgentPosition` references from the pre-refactor version of this plan.
+- **Broadcast-strategy trap (raised during review, fixed in Task 9):** identified that replacing frontend state wholesale on every message would silently drop agents if the backend ever moved to delta broadcasts. Fixed by adding `mergeAgents` (Task 9, Steps 5-8) — upserts by id, never deletes on absence — with a regression test (`does not drop an agent that is absent from the incoming list`) proving the exact failure mode is covered. `AgentScene` (Task 10) needed no change, since it already just renders whatever the `agents` prop contains; the fix is entirely in how that prop's value is built.
