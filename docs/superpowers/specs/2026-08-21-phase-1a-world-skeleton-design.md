@@ -42,8 +42,11 @@ architecture direction:
 
 - **Grid**: fixed dimensions (~20x20 to 30x30 tiles), discrete tile
   coordinates. No zone data yet — just a coordinate space with bounds.
-- **Agent**: a single agent with an `(x, y)` tile position. No role, no
-  memory, no name required for this phase — just enough to exist and move.
+- **Agent**: an `id` plus an `(x, y)` tile position. No role, no memory, no
+  name required for this phase — just enough to exist and move. Modeled as
+  a collection (`list[Agent]`, one entry) rather than a single hardcoded
+  agent, specifically so a second agent later is an added list entry, not
+  a restructure. See the implementation plan for the exact interfaces.
 - **Movement**: discrete, tile-to-tile (not continuous/free position).
   4-directional only (up/down/left/right) — no diagonals, matching a
   classic Game Boy-era Pokémon movement model.
