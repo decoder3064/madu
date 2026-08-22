@@ -850,7 +850,7 @@ rm frontend/src/hooks/useAgentPositions.ts
 - [ ] **Step 3: Run the full frontend test suite**
 
 Run (from `frontend/`): `npm run test`
-Expected: PASS (all existing tests still pass — this task adds no new tests, and nothing else imports `useAgentPositions` yet at this point in the plan)
+Expected: PASS (all existing tests still pass — this task adds no new tests). Note: `App.tsx` still imports the now-deleted `useAgentPositions` at this point in the plan — that's expected and harmless here, since Vitest only runs test files and what they import, not `App.tsx` itself. `App.tsx` gets rewired in Task 10; don't fix it early.
 
 - [ ] **Step 4: Commit**
 
