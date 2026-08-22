@@ -87,3 +87,9 @@ from and why it doesn't need action today.
   already in the current scene instead of always rebuilding) — that would
   be a small, self-contained change inside this one file, nothing else in
   the project would need to change.
+- Minor, not urgent: when a villager's shape does get thrown away (during a
+  full scene rebuild, see above), the small chunk of GPU memory it used
+  isn't explicitly freed right away — it just waits to be cleaned up
+  automatically later. This already existed before the fix above and isn't
+  made worse by it. Only worth real attention if scene rebuilds ever become
+  frequent, which per the note above, they shouldn't.
