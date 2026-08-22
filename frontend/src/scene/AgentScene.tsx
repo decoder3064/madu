@@ -59,6 +59,7 @@ export function AgentScene({ agents }: AgentSceneProps) {
       cancelAnimationFrame(frameId)
       mount.removeChild(renderer.domElement)
       renderer.dispose()
+      meshesRef.current.clear()
     }
   }, [])
 
