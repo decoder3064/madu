@@ -12,6 +12,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-21-phase-1a-world-skeleton-design.md`
 
+> **Port note (added after Task 11):** the example commands throughout
+> this plan use port 8000. The actual port ended up being **8420** due to
+> a local conflict discovered during Task 11 — see `IMPORTANT_NOTES.md`
+> and `README.md`'s "Running it" section for the current, correct port.
+
 ## Global Constraints
 
 - Discrete grid movement, 4-directional only (up/down/left/right), no diagonals.
