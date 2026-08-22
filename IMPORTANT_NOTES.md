@@ -41,3 +41,16 @@ from and why it doesn't need action today.
   program would crash. Today, villagers are always set up before the
   simulation starts, so this doesn't happen — only matters if "add a
   villager mid-game" becomes a real feature later.
+
+## Task 7: Wiring everything together (main.py)
+
+- Found and fixed a real gap that had been there since Task 1: running the
+  tests the exact way the plan documents (plain `pytest`, from inside the
+  `backend` folder) actually failed to even load *any* test file, not just
+  this task's — every earlier task's tests had only been passing because
+  they happened to get run a slightly different way. Fixed by adding one
+  line (`pythonpath = .`) to `backend/pytest.ini`. Verified directly: removed
+  the line, confirmed all 6 test files broke with the same error, put it
+  back, confirmed all 20 tests pass again. This is now fixed — nothing to
+  do, just documenting that it was a real, quietly-existing gap and not a
+  one-off Task 7 workaround.
