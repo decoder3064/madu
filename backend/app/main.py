@@ -11,10 +11,14 @@ from app.core.config import (
     AGENT_START_ID,
     AGENT_START_X,
     AGENT_START_Y,
+    PLAYER_START_ID,
+    PLAYER_START_X,
+    PLAYER_START_Y,
     TICK_INTERVAL_SECONDS,
 )
 from app.world.grid import Grid
 from app.world.agent import Agent
+from app.world.player import Player
 from app.world.simulation import Simulation
 from app.persistence.store import Store
 from app.api.websocket import ConnectionManager
@@ -24,6 +28,7 @@ logger = logging.getLogger(__name__)
 store = Store(
     Grid(GRID_WIDTH, GRID_HEIGHT),
     [Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y)],
+    Player(player_id=PLAYER_START_ID, x=PLAYER_START_X, y=PLAYER_START_Y),
 )
 simulation = Simulation(store)
 manager = ConnectionManager()
