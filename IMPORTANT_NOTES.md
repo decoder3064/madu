@@ -42,6 +42,15 @@ from and why it doesn't need action today.
   simulation starts, so this doesn't happen — only matters if "add a
   villager mid-game" becomes a real feature later.
 
+## Task 9: Connecting to the backend
+
+- If the backend ever sends a broken or unexpected message, the frontend
+  doesn't handle that gracefully yet — it would fail loudly instead of just
+  ignoring the bad message. Not a problem today since the backend always
+  sends well-formed messages. Worth revisiting if this project ever adds
+  something that could send bad data (a flaky network, a future backend
+  bug, etc).
+
 ## Task 7: Wiring everything together (main.py)
 
 - Found and fixed a real gap that had been there since Task 1: running the
