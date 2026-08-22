@@ -93,3 +93,30 @@ from and why it doesn't need action today.
   automatically later. This already existed before the fix above and isn't
   made worse by it. Only worth real attention if scene rebuilds ever become
   frequent, which per the note above, they shouldn't.
+
+## Task 11 and the port fix: confirmed working end to end
+
+- Phase 1a's actual goal — watch a villager move live in a real browser,
+  with zero manual refresh — was confirmed working by the user directly,
+  in their own real browser, after moving the backend off port 8000.
+- The backend's WebSocket port was originally 8000, which turned out to
+  collide with a completely unrelated project's Docker container already
+  using that port on the same machine (confirmed via `docker ps` showing
+  a real container bound to `0.0.0.0:8000` and `[::]:8000`). Browsers and
+  command-line tools like `curl` can resolve "localhost" differently
+  (IPv4 vs IPv6), which meant some connection attempts reached Madu's
+  backend and others reached the unrelated container by accident — this
+  is why the same setup looked broken sometimes and fine other times.
+- Fixed by moving Madu's backend to **port 8420** instead, in both the
+  running server and the one place the frontend hardcodes it
+  (`frontend/src/App.tsx`). If this project is ever moved to a shared or
+  more permanent environment, worth giving this port a real home in
+  configuration rather than a hardcoded string, so it can't silently
+  collide with something else again.
+
+## Port note for anyone following the phase 1a plan/spec documents
+
+- The phase 1a plan and spec documents' example commands still say port
+  8000 — that was accurate when they were written, before the conflict
+  above was discovered. The actual port to use is **8420** — see
+  `README.md`'s "Running it" section for the current, correct commands.

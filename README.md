@@ -15,14 +15,39 @@ phase-by-phase design specs.
 
 ## Status
 
-Currently in **Phase 1a**: a backend-owned grid with one agent whose
-position ticks and streams live to a Three.js frontend. See the
+**Phase 1a is complete**: the backend owns a grid and a collection of agents,
+ticks their positions on a timer, and streams live updates over WebSocket to
+a Three.js frontend that renders each agent as a moving 3D low-poly shape.
+See the
 [phase 1a spec](./docs/superpowers/specs/2026-08-21-phase-1a-world-skeleton-design.md)
-for details. Nothing is implemented yet beyond project scaffolding.
+and [phase 1a plan](./docs/superpowers/plans/2026-08-21-phase-1a-world-skeleton.md)
+for full details. See [`IMPORTANT_NOTES.md`](./IMPORTANT_NOTES.md) for
+known gaps and things worth remembering before extending this.
 
-## Architecture (early)
+## Running it
+
+Two terminals, both from the repo root:
+
+**Backend:**
+```bash
+cd backend
+.venv/bin/uvicorn app.main:app --reload --port 8420
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm run dev
+```
+
+Then open the URL Vite prints (typically `http://localhost:5173` or the
+next free port). Port **8420** is used instead of the more common 8000
+because 8000 is commonly used by other local projects — see
+`IMPORTANT_NOTES.md` for why this matters if you ever change it.
+
+## Architecture
 
 - `backend/` — Python + FastAPI. Owns all simulation state; the only thing
   that changes it. See `backend/app/` for the module layout.
-- Frontend (not yet scaffolded) — React + Three.js, renders whatever state
-  the backend sends over WebSocket. Never computes state itself.
+- `frontend/` — React + Three.js. Renders whatever state the backend sends
+  over WebSocket. Never computes state itself.

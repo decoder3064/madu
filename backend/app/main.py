@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -18,6 +19,8 @@ from app.world.simulation import Simulation
 from app.persistence.store import Store
 from app.api.websocket import ConnectionManager
 
+logger = logging.getLogger(__name__)
+
 store = Store(
     Grid(GRID_WIDTH, GRID_HEIGHT),
     [Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y)],
@@ -33,8 +36,11 @@ def _agents_payload(agents) -> dict:
 async def tick_loop():
     while True:
         await asyncio.sleep(TICK_INTERVAL_SECONDS)
-        agents = simulation.tick()
-        await manager.broadcast(_agents_payload(agents))
+        try:
+            agents = simulation.tick()
+            await manager.broadcast(_agents_payload(agents))
+        except Exception:
+            logger.exception("tick_loop failed on this tick")
 
 
 @asynccontextmanager
