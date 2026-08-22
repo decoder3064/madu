@@ -63,3 +63,27 @@ from and why it doesn't need action today.
   back, confirmed all 20 tests pass again. This is now fixed — nothing to
   do, just documenting that it was a real, quietly-existing gap and not a
   one-off Task 7 workaround.
+
+## Task 10: The 3D scene
+
+- Found and fixed a real bug via direct browser testing (not caught by code
+  review, since it only shows up when actually running): villager shapes
+  never appeared on screen, even though the ground rendered fine and the
+  position logic was correct. Cause: a React development-only safety check
+  runs the scene-setup code once, throws it away, and runs it again — the
+  code that remembers "I already made a shape for this villager" survived
+  that throw-away-and-redo, so it skipped re-adding shapes to the rebuilt
+  scene. Fixed by clearing that memory whenever the scene gets torn down,
+  so shapes always get freshly placed into whichever scene actually exists.
+  Verified directly by toggling the safety check off/on and watching the
+  shapes appear/disappear correspondingly.
+- This fix rebuilds every shape from scratch whenever the whole 3D view
+  gets torn down and rebuilt (not on every villager move, not on adding a
+  new villager — only a full scene rebuild, which should be rare/never in
+  normal use). The cost scales with how often the *scene* rebuilds, not
+  with how many villagers exist, so this doesn't need revisiting just
+  because the town grows. If a full scene rebuild ever becomes frequent for
+  some real reason, a more efficient version exists (reuse a shape if it's
+  already in the current scene instead of always rebuilding) — that would
+  be a small, self-contained change inside this one file, nothing else in
+  the project would need to change.
