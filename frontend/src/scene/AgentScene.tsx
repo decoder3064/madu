@@ -33,8 +33,17 @@ export function AgentScene({ agents, player }: AgentSceneProps) {
     camera.lookAt(GRID_SIZE / 2, 0, GRID_SIZE / 2)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true })
-    renderer.setSize(mount.clientWidth, mount.clientHeight)
     mount.appendChild(renderer.domElement)
+
+    const handleResize = () => {
+      const width = mount.clientWidth
+      const height = mount.clientHeight
+      camera.aspect = width / height
+      camera.updateProjectionMatrix()
+      renderer.setSize(width, height)
+    }
+    handleResize()
+    window.addEventListener('resize', handleResize)
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE),
@@ -62,6 +71,7 @@ export function AgentScene({ agents, player }: AgentSceneProps) {
     animate()
 
     return () => {
+      window.removeEventListener('resize', handleResize)
       cancelAnimationFrame(frameId)
       mount.removeChild(renderer.domElement)
       renderer.dispose()
