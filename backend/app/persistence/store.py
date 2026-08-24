@@ -1,11 +1,13 @@
 from app.world.grid import Grid
 from app.world.agent import Agent
+from app.world.player import Player
 
 
 class Store:
-    def __init__(self, grid: Grid, agents: list[Agent]):
+    def __init__(self, grid: Grid, agents: list[Agent], player: Player):
         self._grid = grid
         self._agents = {agent.id: agent for agent in agents}
+        self._player = player
 
     def get_grid(self) -> Grid:
         return self._grid
@@ -19,3 +21,10 @@ class Store:
     def set_agent_position(self, agent_id: str, x: int, y: int) -> None:
         self._agents[agent_id].x = x
         self._agents[agent_id].y = y
+
+    def get_player(self) -> Player:
+        return self._player
+
+    def set_player_position(self, x: int, y: int) -> None:
+        self._player.x = x
+        self._player.y = y
