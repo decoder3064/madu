@@ -141,3 +141,11 @@ from and why it doesn't need action today.
   Confirmed fixed directly: took a real screenshot showing the ground,
   grid lines, the villager, and the player all rendering correctly at
   their expected positions.
+
+## Phase 1b, Task 10: confirmed working end to end
+
+- Phase 1b's actual goal — press an arrow key and watch a player-controlled
+  shape move live, independent of the villager's own automatic walking —
+  was confirmed working by the user directly, in their own real browser.
+  Both the villager and the player were seen moving correctly at the
+  same time.
