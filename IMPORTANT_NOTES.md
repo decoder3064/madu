@@ -120,3 +120,12 @@ from and why it doesn't need action today.
   8000 — that was accurate when they were written, before the conflict
   above was discovered. The actual port to use is **8420** — see
   `README.md`'s "Running it" section for the current, correct commands.
+
+## Phase 1b, Task 5: player movement wiring
+
+- When the player tries to walk off the edge of the board, the backend
+  still tells every connected browser "here's the current state" even
+  though nothing actually changed — a small, harmless bit of redundant
+  network chatter rather than a real problem. Not fixed now since it
+  doesn't affect correctness, just worth knowing about if this project
+  ever needs to care about minimizing unnecessary network traffic.
