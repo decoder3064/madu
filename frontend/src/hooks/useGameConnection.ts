@@ -1,4 +1,3 @@
-// frontend/src/hooks/useGameConnection.ts
 import { useEffect, useRef, useState } from 'react'
 import { parseAgentsMessage, AgentPosition } from './parseAgentsMessage'
 import { mergeAgents } from './mergeAgents'
@@ -32,7 +31,9 @@ export function useGameConnection(url: string): GameConnection {
   }, [url])
 
   const sendMove = (direction: 'up' | 'down' | 'left' | 'right') => {
-    socketRef.current?.send(JSON.stringify({ type: 'move', direction }))
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'move', direction }))
+    }
   }
 
   return { agents: Array.from(agents.values()), player, sendMove }

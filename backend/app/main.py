@@ -64,10 +64,10 @@ def create_app() -> FastAPI:
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         await manager.connect(websocket)
-        await websocket.send_text(
-            json.dumps(_state_payload(store.get_agents(), store.get_player()))
-        )
         try:
+            await websocket.send_text(
+                json.dumps(_state_payload(store.get_agents(), store.get_player()))
+            )
             while True:
                 raw = await websocket.receive_text()
                 direction = parse_move_command(raw)
@@ -80,6 +80,10 @@ def create_app() -> FastAPI:
                         _state_payload(store.get_agents(), store.get_player())
                     )
         except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.exception("websocket_endpoint failed")
+        finally:
             manager.disconnect(websocket)
 
     return app

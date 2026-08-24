@@ -16,7 +16,8 @@ const KEY_TO_DIRECTION: Record<string, Direction> = {
 export function useKeyboardMovement(onMove: (direction: Direction) => void): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const direction = KEY_TO_DIRECTION[event.key]
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const direction = KEY_TO_DIRECTION[event.key] ?? KEY_TO_DIRECTION[event.key.toLowerCase()]
       if (direction) {
         onMove(direction)
       }
