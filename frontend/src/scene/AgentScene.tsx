@@ -6,12 +6,14 @@ const GRID_SIZE = 20
 
 interface AgentSceneProps {
   agents: AgentPosition[]
+  player: AgentPosition | null
 }
 
-export function AgentScene({ agents }: AgentSceneProps) {
+export function AgentScene({ agents, player }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const meshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
+  const playerMeshRef = useRef<THREE.Mesh | null>(null)
 
   useEffect(() => {
     const mount = mountRef.current
@@ -42,6 +44,10 @@ export function AgentScene({ agents }: AgentSceneProps) {
     ground.position.set(GRID_SIZE / 2, 0, GRID_SIZE / 2)
     scene.add(ground)
 
+    const gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, 0x000000, 0x000000)
+    gridHelper.position.set(GRID_SIZE / 2, 0.01, GRID_SIZE / 2)
+    scene.add(gridHelper)
+
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
     scene.add(ambientLight)
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
@@ -60,6 +66,7 @@ export function AgentScene({ agents }: AgentSceneProps) {
       mount.removeChild(renderer.domElement)
       renderer.dispose()
       meshesRef.current.clear()
+      playerMeshRef.current = null
     }
   }, [])
 
@@ -88,6 +95,29 @@ export function AgentScene({ agents }: AgentSceneProps) {
       mesh.position.set(agent.x + 0.5, 0.5, agent.y + 0.5)
     }
   }, [agents])
+
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    if (!player) {
+      if (playerMeshRef.current) {
+        scene.remove(playerMeshRef.current)
+        playerMeshRef.current = null
+      }
+      return
+    }
+
+    let mesh = playerMeshRef.current
+    if (!mesh) {
+      const geometry = new THREE.TetrahedronGeometry(0.5, 0)
+      const material = new THREE.MeshStandardMaterial({ color: 0xffff00 })
+      mesh = new THREE.Mesh(geometry, material)
+      scene.add(mesh)
+      playerMeshRef.current = mesh
+    }
+    mesh.position.set(player.x + 0.5, 0.5, player.y + 0.5)
+  }, [player])
 
   return <div ref={mountRef} style={{ width: '100%', height: '100vh' }} />
 }
