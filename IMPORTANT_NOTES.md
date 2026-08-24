@@ -129,3 +129,15 @@ from and why it doesn't need action today.
   network chatter rather than a real problem. Not fixed now since it
   doesn't affect correctness, just worth knowing about if this project
   ever needs to care about minimizing unnecessary network traffic.
+
+## Phase 1b, Tasks 8-9: the "white edges" sizing bug is now fixed
+
+- Fixed the long-standing issue where the 3D view sometimes showed a big
+  blank/white gap around it, or rendered fully blank. Cause: the view's
+  size was only ever measured once, the instant the page loaded — if that
+  first measurement was off, nothing ever corrected it, and resizing the
+  browser window only made it worse. Fixed by re-measuring and resizing
+  properly every time the window resizes (and once right away on load).
+  Confirmed fixed directly: took a real screenshot showing the ground,
+  grid lines, the villager, and the player all rendering correctly at
+  their expected positions.
