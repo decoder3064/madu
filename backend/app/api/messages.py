@@ -16,7 +16,7 @@ def parse_move_command(raw: str) -> str | None:
         return None
 
     direction = data.get("direction")
-    if direction not in VALID_DIRECTIONS:
+    if not isinstance(direction, str) or direction not in VALID_DIRECTIONS:
         return None
 
     return direction

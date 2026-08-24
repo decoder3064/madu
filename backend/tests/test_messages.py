@@ -23,3 +23,11 @@ def test_parse_move_command_returns_none_for_invalid_json():
 
 def test_parse_move_command_returns_none_for_non_object_json():
     assert parse_move_command('[1, 2, 3]') is None
+
+
+def test_parse_move_command_returns_none_for_non_string_direction_list():
+    assert parse_move_command('{"type": "move", "direction": ["up"]}') is None
+
+
+def test_parse_move_command_returns_none_for_non_string_direction_object():
+    assert parse_move_command('{"type": "move", "direction": {}}') is None
