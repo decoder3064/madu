@@ -22,6 +22,7 @@ from app.core.config import (
     BUILDING_2_ID,
     BUILDING_2_X,
     BUILDING_2_Y,
+    HITBOXES_ENABLED,
 )
 from app.world.grid import Grid
 from app.world.agent import Agent
@@ -90,7 +91,14 @@ def create_app() -> FastAPI:
                 if direction is not None:
                     grid = store.get_grid()
                     player = store.get_player()
-                    new_x, new_y = apply_move(grid, player.x, player.y, direction)
+                    new_x, new_y = apply_move(
+                        grid,
+                        player.x,
+                        player.y,
+                        direction,
+                        buildings=store.get_buildings(),
+                        hitboxes_enabled=HITBOXES_ENABLED,
+                    )
                     store.set_player_position(new_x, new_y)
                     await manager.broadcast(
                         _state_payload(store.get_agents(), store.get_player())
