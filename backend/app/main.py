@@ -11,6 +11,12 @@ from app.core.config import (
     AGENT_START_ID,
     AGENT_START_X,
     AGENT_START_Y,
+    AGENT_2_START_ID,
+    AGENT_2_START_X,
+    AGENT_2_START_Y,
+    AGENT_3_START_ID,
+    AGENT_3_START_X,
+    AGENT_3_START_Y,
     TICK_INTERVAL_SECONDS,
     PLAYER_START_ID,
     PLAYER_START_X,
@@ -44,10 +50,20 @@ def _state_payload(agents, player) -> dict:
     }
 
 
+def _initial_payload(agents, player, buildings) -> dict:
+    payload = _state_payload(agents, player)
+    payload["buildings"] = [building.to_dict() for building in buildings]
+    return payload
+
+
 def create_app() -> FastAPI:
     store = Store(
         Grid(GRID_WIDTH, GRID_HEIGHT),
-        [Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y)],
+        [
+            Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y),
+            Agent(agent_id=AGENT_2_START_ID, x=AGENT_2_START_X, y=AGENT_2_START_Y),
+            Agent(agent_id=AGENT_3_START_ID, x=AGENT_3_START_X, y=AGENT_3_START_Y),
+        ],
         Player(player_id=PLAYER_START_ID, x=PLAYER_START_X, y=PLAYER_START_Y),
         [
             Building(
@@ -83,7 +99,11 @@ def create_app() -> FastAPI:
         await manager.connect(websocket)
         try:
             await websocket.send_text(
-                json.dumps(_state_payload(store.get_agents(), store.get_player()))
+                json.dumps(
+                    _initial_payload(
+                        store.get_agents(), store.get_player(), store.get_buildings()
+                    )
+                )
             )
             while True:
                 raw = await websocket.receive_text()
