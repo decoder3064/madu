@@ -9,7 +9,7 @@ def test_tick_moves_single_agent_up_first():
     grid = Grid(width=20, height=20)
     agent = Agent(agent_id="a1", x=10, y=10)
     player = Player(player_id="p1", x=0, y=0)
-    store = Store(grid, [agent], player)
+    store = Store(grid, [agent], player, [])
     sim = Simulation(store)
 
     result = sim.tick()
@@ -22,7 +22,7 @@ def test_tick_cycles_direction_at_top_edge():
     grid = Grid(width=20, height=20)
     agent = Agent(agent_id="a1", x=10, y=0)
     player = Player(player_id="p1", x=0, y=0)
-    store = Store(grid, [agent], player)
+    store = Store(grid, [agent], player, [])
     sim = Simulation(store)
 
     result = sim.tick()
@@ -36,7 +36,7 @@ def test_tick_advances_every_agent_independently():
     agent1 = Agent(agent_id="a1", x=10, y=10)
     agent2 = Agent(agent_id="a2", x=5, y=5)
     player = Player(player_id="p1", x=0, y=0)
-    store = Store(grid, [agent1, agent2], player)
+    store = Store(grid, [agent1, agent2], player, [])
     sim = Simulation(store)
 
     result = sim.tick()
@@ -50,7 +50,7 @@ def test_tick_returns_agents_from_the_store():
     grid = Grid(width=20, height=20)
     agent = Agent(agent_id="a1", x=10, y=10)
     player = Player(player_id="p1", x=0, y=0)
-    store = Store(grid, [agent], player)
+    store = Store(grid, [agent], player, [])
     sim = Simulation(store)
 
     result = sim.tick()

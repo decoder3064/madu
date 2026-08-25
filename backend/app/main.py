@@ -15,10 +15,18 @@ from app.core.config import (
     PLAYER_START_ID,
     PLAYER_START_X,
     PLAYER_START_Y,
+    BUILDING_SIZE,
+    BUILDING_1_ID,
+    BUILDING_1_X,
+    BUILDING_1_Y,
+    BUILDING_2_ID,
+    BUILDING_2_X,
+    BUILDING_2_Y,
 )
 from app.world.grid import Grid
 from app.world.agent import Agent
 from app.world.player import Player
+from app.world.building import Building
 from app.world.simulation import Simulation
 from app.world.movement import apply_move
 from app.persistence.store import Store
@@ -40,6 +48,14 @@ def create_app() -> FastAPI:
         Grid(GRID_WIDTH, GRID_HEIGHT),
         [Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y)],
         Player(player_id=PLAYER_START_ID, x=PLAYER_START_X, y=PLAYER_START_Y),
+        [
+            Building(
+                building_id=BUILDING_1_ID, x=BUILDING_1_X, y=BUILDING_1_Y, size=BUILDING_SIZE
+            ),
+            Building(
+                building_id=BUILDING_2_ID, x=BUILDING_2_X, y=BUILDING_2_Y, size=BUILDING_SIZE
+            ),
+        ],
     )
     simulation = Simulation(store)
     manager = ConnectionManager()
