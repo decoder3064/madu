@@ -1,9 +1,16 @@
+from app.core.config import WALK_DURATION_SECONDS_MIN, REST_DURATION_SECONDS_MAX
 from app.world.grid import Grid
 from app.world.agent import Agent
 from app.world.player import Player
 from app.world.building import Building
 from app.persistence.store import Store
-from app.world.simulation import Simulation
+from app.world.simulation import Simulation, _ticks
+
+
+def test_seconds_convert_to_ticks_at_the_configured_interval():
+    assert _ticks(WALK_DURATION_SECONDS_MIN) == 120
+    assert _ticks(REST_DURATION_SECONDS_MAX) == 720
+    assert _ticks(0) == 1  # never shorter than a single tick
 
 
 def test_tick_moves_single_agent_up_first():
