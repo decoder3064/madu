@@ -3,9 +3,9 @@ import { useKeyboardMovement } from './hooks/useKeyboardMovement'
 import { AgentScene } from './scene/AgentScene'
 
 function App() {
-  const { agents, player, sendMove } = useGameConnection('ws://localhost:8420/ws')
+  const { agents, player, buildings, sendMove } = useGameConnection('ws://localhost:8420/ws')
   useKeyboardMovement(sendMove)
-  return <AgentScene agents={agents} player={player} />
+  return <AgentScene agents={agents} player={player} buildings={buildings} />
 }
 
 export default App
