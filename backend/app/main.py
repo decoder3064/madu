@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
             ),
         ],
     )
-    simulation = Simulation(store)
+    simulation = Simulation(store, hitboxes_enabled=HITBOXES_ENABLED)
     manager = ConnectionManager()
 
     async def tick_loop():
