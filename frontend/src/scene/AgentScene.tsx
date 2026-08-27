@@ -1,19 +1,22 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { AgentPosition } from '../hooks/parseAgentsMessage'
+import { BuildingFootprint } from '../hooks/parseBuildingsMessage'
 
-const GRID_SIZE = 20
+const GRID_SIZE = 50
 
 interface AgentSceneProps {
   agents: AgentPosition[]
   player: AgentPosition | null
+  buildings: BuildingFootprint[]
 }
 
-export function AgentScene({ agents, player }: AgentSceneProps) {
+export function AgentScene({ agents, player, buildings }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const meshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const playerMeshRef = useRef<THREE.Mesh | null>(null)
+  const buildingMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
 
   useEffect(() => {
     const mount = mountRef.current
@@ -29,7 +32,7 @@ export function AgentScene({ agents, player }: AgentSceneProps) {
       0.1,
       1000,
     )
-    camera.position.set(GRID_SIZE / 2, 15, GRID_SIZE + 5)
+    camera.position.set(GRID_SIZE / 2, GRID_SIZE * 0.8, GRID_SIZE * 1.3)
     camera.lookAt(GRID_SIZE / 2, 0, GRID_SIZE / 2)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -57,6 +60,20 @@ export function AgentScene({ agents, player }: AgentSceneProps) {
     gridHelper.position.set(GRID_SIZE / 2, 0.01, GRID_SIZE / 2)
     scene.add(gridHelper)
 
+    const borderPoints = [
+      new THREE.Vector3(0, 0.02, 0),
+      new THREE.Vector3(GRID_SIZE, 0.02, 0),
+      new THREE.Vector3(GRID_SIZE, 0.02, GRID_SIZE),
+      new THREE.Vector3(0, 0.02, GRID_SIZE),
+      new THREE.Vector3(0, 0.02, 0),
+    ]
+    const borderGeometry = new THREE.BufferGeometry().setFromPoints(borderPoints)
+    const border = new THREE.Line(
+      borderGeometry,
+      new THREE.LineBasicMaterial({ color: 0xffffff }),
+    )
+    scene.add(border)
+
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
     scene.add(ambientLight)
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
@@ -77,6 +94,7 @@ export function AgentScene({ agents, player }: AgentSceneProps) {
       renderer.dispose()
       meshesRef.current.clear()
       playerMeshRef.current = null
+      buildingMeshesRef.current.clear()
     }
   }, [])
 
@@ -128,6 +146,25 @@ export function AgentScene({ agents, player }: AgentSceneProps) {
     }
     mesh.position.set(player.x + 0.5, 0.5, player.y + 0.5)
   }, [player])
+
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    for (const building of buildings) {
+      if (buildingMeshesRef.current.has(building.id)) continue
+      const geometry = new THREE.BoxGeometry(building.width, 2, building.height)
+      const material = new THREE.MeshStandardMaterial({ color: 0x808080 })
+      const mesh = new THREE.Mesh(geometry, material)
+      mesh.position.set(
+        building.x + building.width / 2,
+        1,
+        building.y + building.height / 2,
+      )
+      scene.add(mesh)
+      buildingMeshesRef.current.set(building.id, mesh)
+    }
+  }, [buildings])
 
   return <div ref={mountRef} style={{ width: '100%', height: '100vh' }} />
 }

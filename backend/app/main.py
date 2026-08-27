@@ -11,14 +11,29 @@ from app.core.config import (
     AGENT_START_ID,
     AGENT_START_X,
     AGENT_START_Y,
+    AGENT_2_START_ID,
+    AGENT_2_START_X,
+    AGENT_2_START_Y,
+    AGENT_3_START_ID,
+    AGENT_3_START_X,
+    AGENT_3_START_Y,
     TICK_INTERVAL_SECONDS,
     PLAYER_START_ID,
     PLAYER_START_X,
     PLAYER_START_Y,
+    BUILDING_SIZE,
+    BUILDING_1_ID,
+    BUILDING_1_X,
+    BUILDING_1_Y,
+    BUILDING_2_ID,
+    BUILDING_2_X,
+    BUILDING_2_Y,
+    HITBOXES_ENABLED,
 )
 from app.world.grid import Grid
 from app.world.agent import Agent
 from app.world.player import Player
+from app.world.building import Building
 from app.world.simulation import Simulation
 from app.world.movement import apply_move
 from app.persistence.store import Store
@@ -35,13 +50,31 @@ def _state_payload(agents, player) -> dict:
     }
 
 
+def _initial_payload(agents, player, buildings) -> dict:
+    payload = _state_payload(agents, player)
+    payload["buildings"] = [building.to_dict() for building in buildings]
+    return payload
+
+
 def create_app() -> FastAPI:
     store = Store(
         Grid(GRID_WIDTH, GRID_HEIGHT),
-        [Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y)],
+        [
+            Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y),
+            Agent(agent_id=AGENT_2_START_ID, x=AGENT_2_START_X, y=AGENT_2_START_Y),
+            Agent(agent_id=AGENT_3_START_ID, x=AGENT_3_START_X, y=AGENT_3_START_Y),
+        ],
         Player(player_id=PLAYER_START_ID, x=PLAYER_START_X, y=PLAYER_START_Y),
+        [
+            Building(
+                building_id=BUILDING_1_ID, x=BUILDING_1_X, y=BUILDING_1_Y, size=BUILDING_SIZE
+            ),
+            Building(
+                building_id=BUILDING_2_ID, x=BUILDING_2_X, y=BUILDING_2_Y, size=BUILDING_SIZE
+            ),
+        ],
     )
-    simulation = Simulation(store)
+    simulation = Simulation(store, hitboxes_enabled=HITBOXES_ENABLED)
     manager = ConnectionManager()
 
     async def tick_loop():
@@ -66,7 +99,11 @@ def create_app() -> FastAPI:
         await manager.connect(websocket)
         try:
             await websocket.send_text(
-                json.dumps(_state_payload(store.get_agents(), store.get_player()))
+                json.dumps(
+                    _initial_payload(
+                        store.get_agents(), store.get_player(), store.get_buildings()
+                    )
+                )
             )
             while True:
                 raw = await websocket.receive_text()
@@ -74,7 +111,14 @@ def create_app() -> FastAPI:
                 if direction is not None:
                     grid = store.get_grid()
                     player = store.get_player()
-                    new_x, new_y = apply_move(grid, player.x, player.y, direction)
+                    new_x, new_y = apply_move(
+                        grid,
+                        player.x,
+                        player.y,
+                        direction,
+                        buildings=store.get_buildings(),
+                        hitboxes_enabled=HITBOXES_ENABLED,
+                    )
                     store.set_player_position(new_x, new_y)
                     await manager.broadcast(
                         _state_payload(store.get_agents(), store.get_player())

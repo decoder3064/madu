@@ -40,7 +40,10 @@ from and why it doesn't need action today.
   is already running* (instead of having it exist from the start), the
   program would crash. Today, villagers are always set up before the
   simulation starts, so this doesn't happen — only matters if "add a
-  villager mid-game" becomes a real feature later.
+  villager mid-game" becomes a real feature later. Phase 2 update: two more
+  per-villager dicts (`_walking`, `_ticks_remaining`) were added alongside
+  `_direction_index` for the walk/rest cycle — the same exposure described
+  above now applies to all three, not just one.
 
 ## Task 9: Connecting to the backend
 
@@ -149,3 +152,28 @@ from and why it doesn't need action today.
   was confirmed working by the user directly, in their own real browser.
   Both the villager and the player were seen moving correctly at the
   same time.
+
+## Phase 2: villagers couldn't actually reach the buildings by themselves
+
+- With the town's original layout, all three villagers walked in a straight
+  line until they hit the outer edge of the board, then followed that edge
+  forever — none of their starting spots put a building in their path. The
+  "a villager turns away from a building" behavior was real and covered by
+  its own tests, but you'd never actually see it happen in the running app,
+  only the player (arrow keys) could demonstrate walking into a building
+  and being turned away.
+- Fixed by moving villager-3's starting spot from (10, 25) to (17, 25), so
+  its first walk (straight up) runs into building-1's bottom edge and
+  visibly turns away. The other two villagers still loop the outer edge and
+  never meet a building — expected, not a bug, and not worth chasing
+  further until a future phase gives villagers a reason to walk toward a
+  specific place instead of a fixed starting direction.
+
+## Phase 2: the town can look "frozen" for a few minutes at a time
+
+- Villagers walk for 1-2 minutes then rest for 5-6 minutes, each on their
+  own random schedule. Since resting lasts longer than walking, there's a
+  real chance — measured at roughly a coin-flip — that at any given moment
+  nobody is moving, sometimes for several minutes straight. This is the
+  timing that was asked for, not a bug — noting it here so it isn't
+  mistaken for something broken if the page loads during a quiet stretch.
