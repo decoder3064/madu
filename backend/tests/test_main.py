@@ -13,7 +13,7 @@ def test_websocket_sends_initial_state_on_connect():
                 "agents": [
                     {"id": "villager-1", "x": 10, "y": 10},
                     {"id": "villager-2", "x": 25, "y": 10},
-                    {"id": "villager-3", "x": 10, "y": 25},
+                    {"id": "villager-3", "x": 17, "y": 25},
                 ],
                 "player": {"id": "player-1", "x": 5, "y": 5},
                 "buildings": [
