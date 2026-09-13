@@ -29,6 +29,16 @@ from app.core.config import (
     BUILDING_2_X,
     BUILDING_2_Y,
     HITBOXES_ENABLED,
+    AGENT_1_NAME,
+    AGENT_1_ROLE,
+    AGENT_1_LINE,
+    AGENT_2_NAME,
+    AGENT_2_ROLE,
+    AGENT_2_LINE,
+    AGENT_3_NAME,
+    AGENT_3_ROLE,
+    AGENT_3_LINE,
+    TALK_RANGE_TILES,
 )
 from app.world.grid import Grid
 from app.world.agent import Agent
@@ -45,24 +55,52 @@ logger = logging.getLogger(__name__)
 
 def _state_payload(agents, player) -> dict:
     return {
-        "agents": [agent.to_dict() for agent in agents],
+        "agents": [
+            {"id": agent.id, "x": agent.x, "y": agent.y} for agent in agents
+        ],
         "player": player.to_dict(),
     }
 
 
-def _initial_payload(agents, player, buildings) -> dict:
-    payload = _state_payload(agents, player)
-    payload["buildings"] = [building.to_dict() for building in buildings]
-    return payload
+def _initial_payload(agents, player, buildings, grid, talk_range_tiles) -> dict:
+    return {
+        "agents": [agent.to_dict() for agent in agents],
+        "player": player.to_dict(),
+        "buildings": [building.to_dict() for building in buildings],
+        "grid_width": grid.width,
+        "grid_height": grid.height,
+        "talk_range_tiles": talk_range_tiles,
+    }
 
 
 def create_app() -> FastAPI:
     store = Store(
         Grid(GRID_WIDTH, GRID_HEIGHT),
         [
-            Agent(agent_id=AGENT_START_ID, x=AGENT_START_X, y=AGENT_START_Y),
-            Agent(agent_id=AGENT_2_START_ID, x=AGENT_2_START_X, y=AGENT_2_START_Y),
-            Agent(agent_id=AGENT_3_START_ID, x=AGENT_3_START_X, y=AGENT_3_START_Y),
+            Agent(
+                agent_id=AGENT_START_ID,
+                x=AGENT_START_X,
+                y=AGENT_START_Y,
+                name=AGENT_1_NAME,
+                role=AGENT_1_ROLE,
+                line=AGENT_1_LINE,
+            ),
+            Agent(
+                agent_id=AGENT_2_START_ID,
+                x=AGENT_2_START_X,
+                y=AGENT_2_START_Y,
+                name=AGENT_2_NAME,
+                role=AGENT_2_ROLE,
+                line=AGENT_2_LINE,
+            ),
+            Agent(
+                agent_id=AGENT_3_START_ID,
+                x=AGENT_3_START_X,
+                y=AGENT_3_START_Y,
+                name=AGENT_3_NAME,
+                role=AGENT_3_ROLE,
+                line=AGENT_3_LINE,
+            ),
         ],
         Player(player_id=PLAYER_START_ID, x=PLAYER_START_X, y=PLAYER_START_Y),
         [
@@ -101,7 +139,11 @@ def create_app() -> FastAPI:
             await websocket.send_text(
                 json.dumps(
                     _initial_payload(
-                        store.get_agents(), store.get_player(), store.get_buildings()
+                        store.get_agents(),
+                        store.get_player(),
+                        store.get_buildings(),
+                        store.get_grid(),
+                        TALK_RANGE_TILES,
                     )
                 )
             )
