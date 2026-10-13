@@ -3,11 +3,17 @@ import { parseAgentsMessage, AgentPosition } from './parseAgentsMessage'
 import { mergeAgents } from './mergeAgents'
 import { parsePlayerPosition } from './parsePlayerPosition'
 import { parseBuildingsMessage, BuildingFootprint } from './parseBuildingsMessage'
+import { parseGridSize, GridSize } from './parseGridSize'
+import { parseVillagerIdentities, VillagerIdentity } from './parseVillagerIdentities'
+import { parseTalkRange } from './parseTalkRange'
+import { mergeVillagerData, Villager } from './mergeVillagerData'
 
 export interface GameConnection {
-  agents: AgentPosition[]
+  agents: Villager[]
   player: AgentPosition | null
   buildings: BuildingFootprint[]
+  gridSize: GridSize | null
+  talkRangeTiles: number
   sendMove: (direction: 'up' | 'down' | 'left' | 'right') => void
 }
 
@@ -15,6 +21,11 @@ export function useGameConnection(url: string): GameConnection {
   const [agents, setAgents] = useState<Map<string, AgentPosition>>(new Map())
   const [player, setPlayer] = useState<AgentPosition | null>(null)
   const [buildings, setBuildings] = useState<BuildingFootprint[]>([])
+  const [gridSize, setGridSize] = useState<GridSize | null>(null)
+  const [villagerIdentities, setVillagerIdentities] = useState<
+    Map<string, VillagerIdentity>
+  >(new Map())
+  const [talkRangeTiles, setTalkRangeTiles] = useState<number>(0)
   const socketRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -29,6 +40,16 @@ export function useGameConnection(url: string): GameConnection {
       const data = JSON.parse(event.data)
       if (data.buildings !== undefined) {
         setBuildings(parseBuildingsMessage(event.data))
+        setGridSize(parseGridSize(event.data))
+        setVillagerIdentities(
+          new Map(
+            parseVillagerIdentities(event.data).map((identity) => [
+              identity.id,
+              identity,
+            ]),
+          ),
+        )
+        setTalkRangeTiles(parseTalkRange(event.data))
       }
     }
 
@@ -44,5 +65,12 @@ export function useGameConnection(url: string): GameConnection {
     }
   }
 
-  return { agents: Array.from(agents.values()), player, buildings, sendMove }
+  return {
+    agents: mergeVillagerData(Array.from(agents.values()), villagerIdentities),
+    player,
+    buildings,
+    gridSize,
+    talkRangeTiles,
+    sendMove,
+  }
 }
