@@ -26,6 +26,19 @@ const SKY_COLOR = 0xa8d4ef
 const GRASS_COLOR = 0x6a9a4f
 const SUN_COLOR = 0xffe0b0
 
+// Brightness steps every surface snaps to: shadow, mid, lit.
+const TOON_STEPS = new THREE.DataTexture(new Uint8Array([90, 170, 255]), 3, 1, THREE.RedFormat)
+TOON_STEPS.minFilter = THREE.NearestFilter
+TOON_STEPS.magFilter = THREE.NearestFilter
+TOON_STEPS.generateMipmaps = false
+TOON_STEPS.needsUpdate = true
+
+// Closed shapes cast shadows from their back faces so they never shadow their own front.
+function toonMaterial(color: number): THREE.MeshToonMaterial {
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS, shadowSide: THREE.BackSide })
+}
+
+const WATER_BANDS = 5.0
 const WATER_TIME = { value: 0 }
 
 // Extends the standard lit material so the sea keeps sunlight, shadows, and fog.
@@ -61,6 +74,13 @@ varying vec2 vWaterPos;`,
         `#include <color_fragment>
 float shimmer = sin(vWaterPos.x * 1.3 + uTime * 1.5) * sin(vWaterPos.y * 1.1 - uTime * 1.2);
 diffuseColor.rgb += shimmer * 0.05;`,
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `float brightness = dot(outgoingLight, vec3(0.299, 0.587, 0.114));
+float steppedBrightness = ceil(brightness * ${WATER_BANDS.toFixed(1)}) / ${WATER_BANDS.toFixed(1)};
+outgoingLight *= steppedBrightness / max(brightness, 0.001);
+#include <opaque_fragment>`,
       )
   }
   return material
@@ -305,7 +325,7 @@ export function AgentScene({
     renderer.setPixelRatio(1 / PIXEL_SIZE)
     renderer.domElement.style.imageRendering = 'pixelated'
     renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    renderer.shadowMap.type = THREE.BasicShadowMap
     mount.appendChild(renderer.domElement)
 
     // Dev overlays draw on their own full-resolution canvas so they stay thin and crisp over the pixel art.
@@ -331,7 +351,7 @@ export function AgentScene({
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(gridWidth, gridHeight),
-      new THREE.MeshStandardMaterial({ color: GRASS_COLOR }),
+      toonMaterial(GRASS_COLOR),
     )
     ground.receiveShadow = true
     ground.rotation.x = -Math.PI / 2
@@ -390,7 +410,7 @@ export function AgentScene({
     sun.shadow.camera.bottom = -shadowReach
     sun.shadow.camera.near = 1
     sun.shadow.camera.far = gridSpan * 3
-    sun.shadow.bias = -0.0005
+    sun.shadow.bias = -0.002
     sun.shadow.normalBias = 0.02
     scene.add(sun)
     scene.add(sun.target)
@@ -553,7 +573,7 @@ export function AgentScene({
       let mesh = meshesRef.current.get(agent.id)
       if (!mesh) {
         const geometry = new THREE.IcosahedronGeometry(0.4, 0)
-        const material = new THREE.MeshStandardMaterial({ color: 0xe8a87c })
+        const material = toonMaterial(0xe8a87c)
         mesh = new THREE.Mesh(geometry, material)
         mesh.castShadow = true
         scene.add(mesh)
@@ -586,7 +606,7 @@ export function AgentScene({
     let mesh = playerMeshRef.current
     if (!mesh) {
       const geometry = new THREE.TetrahedronGeometry(0.5, 0)
-      const material = new THREE.MeshStandardMaterial({ color: 0xffff00 })
+      const material = toonMaterial(0xffff00)
       mesh = new THREE.Mesh(geometry, material)
       mesh.castShadow = true
       scene.add(mesh)
@@ -607,9 +627,7 @@ export function AgentScene({
       if (townMeshesRef.current.has(entity.id)) continue
       const style = KIND_STYLES[entity.kind] ?? UNKNOWN_KIND_STYLE
       const isWater = entity.kind === 'water'
-      const material = isWater
-        ? makeWaterMaterial(style.color)
-        : new THREE.MeshStandardMaterial({ color: style.color })
+      const material = isWater ? makeWaterMaterial(style.color) : toonMaterial(style.color)
       const centerX = entity.x + entity.width / 2
       const centerZ = entity.y + entity.height / 2
 
