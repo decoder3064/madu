@@ -95,6 +95,9 @@ function glide(mesh: THREE.Mesh, delta: number, time: number) {
     : BODY_HEIGHT
 }
 
+// Screen pixels per art pixel. Higher is chunkier.
+const PIXEL_SIZE = 3
+
 const ISO_YAW = Math.PI / 4
 // About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
 const ISO_PITCH = Math.PI / 6
@@ -277,14 +280,17 @@ export function AgentScene({
     mount.addEventListener('pointerup', handlePointerUp)
     mount.addEventListener('pointercancel', handlePointerUp)
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    const renderer = new THREE.WebGLRenderer({ antialias: false })
+    renderer.setPixelRatio(1 / PIXEL_SIZE)
+    renderer.domElement.style.imageRendering = 'pixelated'
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
     mount.appendChild(renderer.domElement)
 
     const handleResize = () => {
-      const width = mount.clientWidth
-      const height = mount.clientHeight
+      // Whole art pixels only, so every pixel is the same size on screen.
+      const width = Math.floor(mount.clientWidth / PIXEL_SIZE) * PIXEL_SIZE
+      const height = Math.floor(mount.clientHeight / PIXEL_SIZE) * PIXEL_SIZE
       updateCameraFrame()
       renderer.setSize(width, height)
     }
