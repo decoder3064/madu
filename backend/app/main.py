@@ -8,15 +8,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from app.core.config import (
     GRID_WIDTH,
     GRID_HEIGHT,
-    AGENT_START_ID,
-    AGENT_START_X,
-    AGENT_START_Y,
-    AGENT_2_START_ID,
-    AGENT_2_START_X,
-    AGENT_2_START_Y,
-    AGENT_3_START_ID,
-    AGENT_3_START_X,
-    AGENT_3_START_Y,
     TICK_INTERVAL_SECONDS,
     PLAYER_START_ID,
     PLAYER_START_X,
@@ -29,17 +20,9 @@ from app.core.config import (
     BUILDING_2_X,
     BUILDING_2_Y,
     HITBOXES_ENABLED,
-    AGENT_1_NAME,
-    AGENT_1_ROLE,
-    AGENT_1_LINE,
-    AGENT_2_NAME,
-    AGENT_2_ROLE,
-    AGENT_2_LINE,
-    AGENT_3_NAME,
-    AGENT_3_ROLE,
-    AGENT_3_LINE,
     TALK_RANGE_TILES,
 )
+from app.core.villagers import VILLAGERS
 from app.world.grid import Grid
 from app.world.agent import Agent
 from app.world.player import Player
@@ -78,29 +61,15 @@ def create_app() -> FastAPI:
         Grid(GRID_WIDTH, GRID_HEIGHT),
         [
             Agent(
-                agent_id=AGENT_START_ID,
-                x=AGENT_START_X,
-                y=AGENT_START_Y,
-                name=AGENT_1_NAME,
-                role=AGENT_1_ROLE,
-                line=AGENT_1_LINE,
-            ),
-            Agent(
-                agent_id=AGENT_2_START_ID,
-                x=AGENT_2_START_X,
-                y=AGENT_2_START_Y,
-                name=AGENT_2_NAME,
-                role=AGENT_2_ROLE,
-                line=AGENT_2_LINE,
-            ),
-            Agent(
-                agent_id=AGENT_3_START_ID,
-                x=AGENT_3_START_X,
-                y=AGENT_3_START_Y,
-                name=AGENT_3_NAME,
-                role=AGENT_3_ROLE,
-                line=AGENT_3_LINE,
-            ),
+                agent_id=v.id,
+                x=v.x,
+                y=v.y,
+                name=v.name,
+                role=v.role,
+                line=v.line,
+                backstory=v.backstory,
+            )
+            for v in VILLAGERS
         ],
         Player(player_id=PLAYER_START_ID, x=PLAYER_START_X, y=PLAYER_START_Y),
         [

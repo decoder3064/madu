@@ -41,8 +41,8 @@ def test_websocket_sends_initial_state_on_connect():
                     {"id": "building-1", "x": 15, "y": 15, "width": 5, "height": 5},
                     {"id": "building-2", "x": 35, "y": 35, "width": 5, "height": 5},
                 ],
-                "grid_width": 50,
-                "grid_height": 50,
+                "grid_width": 100,
+                "grid_height": 100,
                 "talk_range_tiles": 3,
             }
 

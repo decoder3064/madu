@@ -10,11 +10,14 @@ class Agent(Entity):
         name: str = "",
         role: str = "",
         line: str = "",
+        backstory: str = "",
     ):
         super().__init__(entity_id=agent_id, x=x, y=y)
         self.name = name
         self.role = role
         self.line = line
+        self.backstory = backstory
+        self.memories: list[str] = []
 
     def to_dict(self) -> dict:
         return {

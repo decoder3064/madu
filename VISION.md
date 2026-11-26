@@ -51,6 +51,28 @@ few minutes without touching anything, it still feels alive.
   separated on purpose so the renderer can change without touching the
   simulation.
 
+## Engineering Ambition (not just features)
+
+This project is also how I get good at AI/ML and agentic engineering — not
+just a checklist of features. The model itself is a commodity; the parts
+worth building well are the parts around it:
+
+- A real memory store with ranked retrieval, not just "paste recent events"
+  into a prompt — proper RAG (retrieval-augmented generation), not the
+  buzzword version.
+- An agentic decision loop: a villager picks an action from a defined list,
+  code executes it for real (pathfinding included), and the outcome becomes
+  a new memory.
+- Event-driven town evolution — the town changes as a side effect of what
+  agents do, not a script I write by hand.
+- An observability layer — a live debug view into what a villager
+  remembers and decided, and why.
+- Evals — an automated way to check that a villager's dialogue actually
+  makes sense given their backstory and memories, instead of eyeballing it.
+
+Each of these gets built as its own deliberate, reviewed piece — not a
+shortcut bolted on just to make a demo look good.
+
 ## How I Want to Work On This
 
 I build progressively, one concrete piece at a time. Each session has ONE
