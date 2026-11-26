@@ -95,6 +95,10 @@ function glide(mesh: THREE.Mesh, delta: number, time: number) {
     : BODY_HEIGHT
 }
 
+const ISO_YAW = Math.PI / 4
+// About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
+const ISO_PITCH = Math.PI / 6
+
 const FOLLOW_EDGE_FRACTION = 0.2
 const FOLLOW_SPEED = 0.1
 
@@ -158,29 +162,26 @@ export function AgentScene({
     scene.background = new THREE.Color(SKY_COLOR)
     sceneRef.current = scene
 
-    const camera = new THREE.PerspectiveCamera(
-      60,
-      mount.clientWidth / mount.clientHeight,
-      0.1,
-      1000,
-    )
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000)
 
     // The larger dimension sets default framing/max zoom-out (so the whole
     // board can come into view); the smaller sets min zoom-in (so a long,
     // narrow board doesn't stop you from getting close).
     const gridSpan = Math.max(gridWidth, gridHeight)
     const gridMinSpan = Math.min(gridWidth, gridHeight)
-    // Fog starts past the default view so only far, zoomed-out edges fade.
-    scene.fog = new THREE.Fog(SKY_COLOR, gridSpan * 0.9, gridSpan * 2.2)
-
     const cameraTarget = new THREE.Vector3(gridWidth / 2, 0, gridHeight / 2)
-    const cameraDirection = new THREE.Vector3(0, gridSpan * 0.8, gridSpan * 0.8).normalize()
-    const MIN_ZOOM_DISTANCE = gridMinSpan * 0.05
-    const MAX_ZOOM_DISTANCE = gridSpan * 1.8
-    // Slightly more than the tightest "fills the whole screen" distance,
-    // so there's visible space around the board instead of it touching
-    // every edge of the window.
-    let cameraDistance = gridSpan * 0.65
+    const cameraDirection = new THREE.Vector3(
+      Math.sin(ISO_YAW) * Math.cos(ISO_PITCH),
+      Math.sin(ISO_PITCH),
+      Math.cos(ISO_YAW) * Math.cos(ISO_PITCH),
+    )
+    // With no perspective, distance only has to keep the whole board in front of the camera.
+    const CAMERA_BACKOFF = gridSpan * 2
+    const MIN_VIEW_HEIGHT = gridMinSpan * 0.1
+    const MAX_VIEW_HEIGHT = gridSpan * 1.3
+    let viewHeight = gridSpan * 0.6
+
+    scene.fog = new THREE.Fog(SKY_COLOR, CAMERA_BACKOFF + gridSpan * 0.3, CAMERA_BACKOFF + gridSpan * 1.2)
 
     // How far past the town's edge you're allowed to drag the view.
     const PAN_MARGIN = gridSpan * 0.3
@@ -190,8 +191,17 @@ export function AgentScene({
     const PAN_Z_MAX = gridHeight + PAN_MARGIN
 
     const updateCameraPosition = () => {
-      camera.position.copy(cameraTarget).addScaledVector(cameraDirection, cameraDistance)
+      camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
       camera.lookAt(cameraTarget)
+    }
+    const updateCameraFrame = () => {
+      const aspect = mount.clientWidth / mount.clientHeight
+      camera.left = (-viewHeight * aspect) / 2
+      camera.right = (viewHeight * aspect) / 2
+      camera.top = viewHeight / 2
+      camera.bottom = -viewHeight / 2
+      camera.far = CAMERA_BACKOFF * 3
+      camera.updateProjectionMatrix()
     }
     updateCameraPosition()
 
@@ -209,12 +219,12 @@ export function AgentScene({
 
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault()
-      cameraDistance = THREE.MathUtils.clamp(
-        cameraDistance + event.deltaY * 0.05,
-        MIN_ZOOM_DISTANCE,
-        MAX_ZOOM_DISTANCE,
+      viewHeight = THREE.MathUtils.clamp(
+        viewHeight + event.deltaY * 0.03,
+        MIN_VIEW_HEIGHT,
+        MAX_VIEW_HEIGHT,
       )
-      updateCameraPosition()
+      updateCameraFrame()
     }
     mount.addEventListener('wheel', handleWheel, { passive: false })
     mount.style.cursor = 'grab'
@@ -247,9 +257,10 @@ export function AgentScene({
       lastPointerX = event.clientX
       lastPointerY = event.clientY
 
-      const panScale = (cameraDistance / mount.clientHeight) * 1.2
-      cameraTarget.addScaledVector(groundRight, -deltaX * panScale)
-      cameraTarget.addScaledVector(groundForward, deltaY * panScale)
+      const worldPerPixel = viewHeight / mount.clientHeight
+      cameraTarget.addScaledVector(groundRight, -deltaX * worldPerPixel)
+      // The ground is tilted away from the camera, so vertical drags cover more ground per pixel.
+      cameraTarget.addScaledVector(groundForward, (deltaY * worldPerPixel) / Math.sin(ISO_PITCH))
       cameraTarget.x = THREE.MathUtils.clamp(cameraTarget.x, PAN_X_MIN, PAN_X_MAX)
       cameraTarget.z = THREE.MathUtils.clamp(cameraTarget.z, PAN_Z_MIN, PAN_Z_MAX)
       updateCameraPosition()
@@ -274,8 +285,7 @@ export function AgentScene({
     const handleResize = () => {
       const width = mount.clientWidth
       const height = mount.clientHeight
-      camera.aspect = width / height
-      camera.updateProjectionMatrix()
+      updateCameraFrame()
       renderer.setSize(width, height)
     }
     handleResize()
