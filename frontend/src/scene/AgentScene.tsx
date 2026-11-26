@@ -22,6 +22,35 @@ const BORDER_HEIGHT = 0.06
 const ROUTE_HEIGHT = 0.15
 const ROUTE_MATERIAL = new THREE.LineBasicMaterial({ color: 0xffcc00 })
 
+const BODY_HEIGHT = 0.5
+// Matches the server: one tile per 0.5-second tick.
+const MIN_GLIDE_SPEED = 2
+const CATCH_UP_RATE = 6
+const SNAP_DISTANCE = 4
+const BOB_SPEED = 14
+const BOB_HEIGHT = 0.12
+const glideDirection = new THREE.Vector3()
+
+function glide(mesh: THREE.Mesh, delta: number, time: number) {
+  const target = mesh.userData.target as THREE.Vector3 | undefined
+  if (!target) return
+  glideDirection.set(target.x - mesh.position.x, 0, target.z - mesh.position.z)
+  const distance = glideDirection.length()
+  if (distance > SNAP_DISTANCE) {
+    mesh.position.set(target.x, BODY_HEIGHT, target.z)
+    return
+  }
+  const speed = Math.max(MIN_GLIDE_SPEED, distance * CATCH_UP_RATE)
+  const step = Math.min(distance, speed * delta)
+  if (distance > 0) {
+    mesh.position.addScaledVector(glideDirection.normalize(), step)
+  }
+  const stillMoving = distance - step > 0.001
+  mesh.position.y = stillMoving
+    ? BODY_HEIGHT + Math.abs(Math.sin(time * BOB_SPEED)) * BOB_HEIGHT
+    : BODY_HEIGHT
+}
+
 const FOLLOW_EDGE_FRACTION = 0.2
 const FOLLOW_SPEED = 0.1
 
@@ -254,8 +283,23 @@ export function AgentScene({
     directionalLight.position.set(10, 20, 10)
     scene.add(directionalLight)
 
+    const clock = new THREE.Clock()
+    const screenSpotOf = (villager: Villager) => {
+      const mesh = meshesRef.current.get(villager.id)
+      if (!mesh) return projectToScreen(villager.x, villager.y)
+      return projectToScreen(mesh.position.x - 0.5, mesh.position.z - 0.5)
+    }
+
     let frameId: number
     const animate = () => {
+      const delta = clock.getDelta()
+      for (const mesh of meshesRef.current.values()) {
+        glide(mesh, delta, clock.elapsedTime)
+      }
+      if (playerMeshRef.current) {
+        glide(playerMeshRef.current, delta, clock.elapsedTime)
+      }
+
       const followed = playerPositionRef.current
       if (followed && followRequestedRef.current && !isDragging) {
         const { left, top } = projectToScreen(followed.x, followed.y)
@@ -281,7 +325,7 @@ export function AgentScene({
       const nearby = nearbyVillagerRef.current
       if (promptEl) {
         if (nearby) {
-          const { left, top } = projectToScreen(nearby.x, nearby.y)
+          const { left, top } = screenSpotOf(nearby)
           promptEl.style.left = `${left}px`
           promptEl.style.top = `${top}px`
           promptEl.style.display = 'block'
@@ -294,7 +338,7 @@ export function AgentScene({
       const talking = talkingVillagerRef.current
       if (bubbleEl) {
         if (talking) {
-          const { left, top } = projectToScreen(talking.x, talking.y)
+          const { left, top } = screenSpotOf(talking)
           bubbleEl.style.left = `${left}px`
           bubbleEl.style.top = `${top}px`
           bubbleEl.style.display = 'block'
@@ -396,8 +440,9 @@ export function AgentScene({
         mesh = new THREE.Mesh(geometry, material)
         scene.add(mesh)
         meshesRef.current.set(agent.id, mesh)
+        mesh.position.set(agent.x + 0.5, BODY_HEIGHT, agent.y + 0.5)
       }
-      mesh.position.set(agent.x + 0.5, 0.5, agent.y + 0.5)
+      mesh.userData.target = new THREE.Vector3(agent.x + 0.5, BODY_HEIGHT, agent.y + 0.5)
     }
   }, [agents])
 
@@ -427,8 +472,9 @@ export function AgentScene({
       mesh = new THREE.Mesh(geometry, material)
       scene.add(mesh)
       playerMeshRef.current = mesh
+      mesh.position.set(player.x + 0.5, BODY_HEIGHT, player.y + 0.5)
     }
-    mesh.position.set(player.x + 0.5, 0.5, player.y + 0.5)
+    mesh.userData.target = new THREE.Vector3(player.x + 0.5, BODY_HEIGHT, player.y + 0.5)
   }, [player])
 
   useEffect(() => {
