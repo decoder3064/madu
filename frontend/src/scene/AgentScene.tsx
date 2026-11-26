@@ -33,9 +33,9 @@ TOON_STEPS.magFilter = THREE.NearestFilter
 TOON_STEPS.generateMipmaps = false
 TOON_STEPS.needsUpdate = true
 
-// Closed shapes cast shadows from their back faces so they never shadow their own front.
+// Front faces cast shadows so a shadow starts right at a wall's base instead of leaving a lit seam.
 function toonMaterial(color: number): THREE.MeshToonMaterial {
-  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS, shadowSide: THREE.BackSide })
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS, shadowSide: THREE.FrontSide })
 }
 
 const WATER_BANDS = 5.0
@@ -117,6 +117,60 @@ function glide(mesh: THREE.Mesh, delta: number, time: number) {
 
 // Screen pixels per art pixel. Higher is chunkier.
 const PIXEL_SIZE = 3
+
+const OUTLINE_DARKEN = 0.45
+const CREASE_DARKEN = 0.8
+// A depth jump counts as an edge only past this many pixels' worth. Flat ground tilted at 30 degrees
+// rises about 1.7 pixels' worth per pixel, so anything below that would outline the whole floor.
+const OUTLINE_DEPTH_GAP_PIXELS = 2.5
+// Faces meeting more sharply than this get a crease line.
+const CREASE_NORMAL_DOT = 0.7
+
+const OUTLINE_VERTEX = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}`
+
+const OUTLINE_FRAGMENT = `
+uniform sampler2D tColor;
+uniform sampler2D tDepth;
+uniform sampler2D tNormal;
+uniform vec2 texel;
+uniform float depthGap;
+varying vec2 vUv;
+
+void checkNeighbor(vec2 offset, float depth, vec3 normal, inout float outline, inout float crease) {
+  vec2 neighborUv = vUv + offset * texel;
+  float neighborDepth = texture2D(tDepth, neighborUv).x;
+  vec3 neighborNormal = texture2D(tNormal, neighborUv).xyz * 2.0 - 1.0;
+  // Only the nearer side of an edge darkens, so outlines stay one pixel wide.
+  if (neighborDepth - depth > depthGap) {
+    outline = 1.0;
+  } else if (abs(neighborDepth - depth) < depthGap && dot(normal, neighborNormal) < ${CREASE_NORMAL_DOT}) {
+    crease = 1.0;
+  }
+}
+
+void main() {
+  vec4 color = texture2D(tColor, vUv);
+  float depth = texture2D(tDepth, vUv).x;
+  vec3 normal = texture2D(tNormal, vUv).xyz * 2.0 - 1.0;
+  float outline = 0.0;
+  float crease = 0.0;
+  checkNeighbor(vec2(1.0, 0.0), depth, normal, outline, crease);
+  checkNeighbor(vec2(-1.0, 0.0), depth, normal, outline, crease);
+  checkNeighbor(vec2(0.0, 1.0), depth, normal, outline, crease);
+  checkNeighbor(vec2(0.0, -1.0), depth, normal, outline, crease);
+  if (outline > 0.0) {
+    color.rgb *= ${OUTLINE_DARKEN};
+  } else if (crease > 0.0) {
+    color.rgb *= ${CREASE_DARKEN};
+  }
+  gl_FragColor = color;
+  #include <colorspace_fragment>
+}`
 
 const ISO_YAW = Math.PI / 4
 // About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
@@ -340,11 +394,39 @@ export function AgentScene({
     })
     mount.appendChild(overlayRenderer.domElement)
 
+    const colorTarget = new THREE.WebGLRenderTarget(1, 1, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    })
+    colorTarget.depthTexture = new THREE.DepthTexture(1, 1)
+    const normalTarget = new THREE.WebGLRenderTarget(1, 1, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    })
+    const normalMaterial = new THREE.MeshNormalMaterial()
+    const outlineMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tColor: { value: colorTarget.texture },
+        tDepth: { value: colorTarget.depthTexture },
+        tNormal: { value: normalTarget.texture },
+        texel: { value: new THREE.Vector2() },
+        depthGap: { value: 0 },
+      },
+      vertexShader: OUTLINE_VERTEX,
+      fragmentShader: OUTLINE_FRAGMENT,
+    })
+    const outlineScene = new THREE.Scene()
+    outlineScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), outlineMaterial))
+    const outlineCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+
     const handleResize = () => {
       const { width, height } = artSize()
       updateCameraFrame()
       renderer.setSize(width * PIXEL_SIZE, height * PIXEL_SIZE)
       overlayRenderer.setSize(width * PIXEL_SIZE, height * PIXEL_SIZE)
+      colorTarget.setSize(width, height)
+      normalTarget.setSize(width, height)
+      outlineMaterial.uniforms.texel.value.set(1 / width, 1 / height)
     }
     handleResize()
     window.addEventListener('resize', handleResize)
@@ -452,7 +534,19 @@ export function AgentScene({
         }
       }
 
+      const worldPerPixel = viewHeight / artSize().height
+      // The isometric camera stores depth evenly from near to far, so a world gap divides straight in.
+      outlineMaterial.uniforms.depthGap.value =
+        (worldPerPixel * OUTLINE_DEPTH_GAP_PIXELS) / (camera.far - camera.near)
+
+      renderer.setRenderTarget(colorTarget)
       renderer.render(scene, camera)
+      scene.overrideMaterial = normalMaterial
+      renderer.setRenderTarget(normalTarget)
+      renderer.render(scene, camera)
+      scene.overrideMaterial = null
+      renderer.setRenderTarget(null)
+      renderer.render(outlineScene, outlineCamera)
       overlayRenderer.render(overlayScene, camera)
 
       const promptEl = promptRef.current
@@ -507,6 +601,10 @@ export function AgentScene({
       renderer.dispose()
       mount.removeChild(overlayRenderer.domElement)
       overlayRenderer.dispose()
+      colorTarget.dispose()
+      normalTarget.dispose()
+      normalMaterial.dispose()
+      outlineMaterial.dispose()
       overlaySceneRef.current = null
       meshesRef.current.clear()
       playerMeshRef.current = null
