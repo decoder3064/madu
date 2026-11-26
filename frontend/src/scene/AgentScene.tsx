@@ -15,6 +15,9 @@ const KIND_STYLES: Record<string, { color: number; height: number; lift: number 
 }
 const UNKNOWN_KIND_STYLE = { color: 0xff00ff, height: 1, lift: 0 }
 
+const FOLLOW_EDGE_FRACTION = 0.2
+const FOLLOW_SPEED = 0.1
+
 const LABEL_STYLE: Partial<CSSStyleDeclaration> = {
   position: 'absolute',
   transform: 'translate(-50%, -50%)',
@@ -54,6 +57,8 @@ export function AgentScene({
   const townMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const townLabelsRef = useRef<{ entity: TownEntity; element: HTMLDivElement }[]>([])
   const labelLayerRef = useRef<HTMLDivElement>(null)
+  const playerPositionRef = useRef<AgentPosition | null>(null)
+  const followRequestedRef = useRef(false)
   const gridLinesRef = useRef<THREE.LineSegments | null>(null)
   const promptRef = useRef<HTMLDivElement>(null)
   const bubbleRef = useRef<HTMLDivElement>(null)
@@ -141,6 +146,7 @@ export function AgentScene({
 
     const handlePointerDown = (event: PointerEvent) => {
       isDragging = true
+      followRequestedRef.current = false
       lastPointerX = event.clientX
       lastPointerY = event.clientY
       mount.setPointerCapture(event.pointerId)
@@ -238,6 +244,25 @@ export function AgentScene({
 
     let frameId: number
     const animate = () => {
+      const followed = playerPositionRef.current
+      if (followed && followRequestedRef.current && !isDragging) {
+        const { left, top } = projectToScreen(followed.x, followed.y)
+        const edgeX = mount.clientWidth * FOLLOW_EDGE_FRACTION
+        const edgeY = mount.clientHeight * FOLLOW_EDGE_FRACTION
+        const nearEdge =
+          left < edgeX ||
+          left > mount.clientWidth - edgeX ||
+          top < edgeY ||
+          top > mount.clientHeight - edgeY
+        if (nearEdge) {
+          cameraTarget.x += (followed.x + 0.5 - cameraTarget.x) * FOLLOW_SPEED
+          cameraTarget.z += (followed.y + 0.5 - cameraTarget.z) * FOLLOW_SPEED
+          updateCameraPosition()
+        } else {
+          followRequestedRef.current = false
+        }
+      }
+
       renderer.render(scene, camera)
 
       const promptEl = promptRef.current
@@ -340,6 +365,13 @@ export function AgentScene({
   }, [agents])
 
   useEffect(() => {
+    const previous = playerPositionRef.current
+    // The server re-sends the player every tick, so only an actual step counts.
+    if (player && (!previous || previous.x !== player.x || previous.y !== player.y)) {
+      followRequestedRef.current = true
+    }
+    playerPositionRef.current = player
+
     const scene = sceneRef.current
     if (!scene) return
 
