@@ -400,7 +400,10 @@ export function AgentScene({
   }, [town])
 
   return (
-    <div ref={mountRef} style={{ width: '100%', height: '100vh', position: 'relative' }}>
+    <div
+      ref={mountRef}
+      style={{ width: '100%', height: '100vh', position: 'relative', overflow: 'hidden' }}
+    >
       <div
         ref={labelLayerRef}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
