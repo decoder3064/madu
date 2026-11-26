@@ -143,6 +143,7 @@ export function AgentScene({
 }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
+  const overlaySceneRef = useRef<THREE.Scene | null>(null)
   const meshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const playerMeshRef = useRef<THREE.Mesh | null>(null)
   const townMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
@@ -307,10 +308,23 @@ export function AgentScene({
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
     mount.appendChild(renderer.domElement)
 
+    // Dev overlays draw on their own full-resolution canvas so they stay thin and crisp over the pixel art.
+    const overlayScene = new THREE.Scene()
+    overlaySceneRef.current = overlayScene
+    const overlayRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    overlayRenderer.setPixelRatio(window.devicePixelRatio)
+    Object.assign(overlayRenderer.domElement.style, {
+      position: 'absolute',
+      inset: '0',
+      pointerEvents: 'none',
+    })
+    mount.appendChild(overlayRenderer.domElement)
+
     const handleResize = () => {
       const { width, height } = artSize()
       updateCameraFrame()
       renderer.setSize(width * PIXEL_SIZE, height * PIXEL_SIZE)
+      overlayRenderer.setSize(width * PIXEL_SIZE, height * PIXEL_SIZE)
     }
     handleResize()
     window.addEventListener('resize', handleResize)
@@ -340,10 +354,10 @@ export function AgentScene({
     )
     const gridLines = new THREE.LineSegments(
       gridLineGeometry,
-      new THREE.LineBasicMaterial({ color: 0x000000 }),
+      new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }),
     )
     gridLines.visible = showGridLines
-    scene.add(gridLines)
+    overlayScene.add(gridLines)
     gridLinesRef.current = gridLines
 
     const borderPoints = [
@@ -358,7 +372,7 @@ export function AgentScene({
       borderGeometry,
       new THREE.LineBasicMaterial({ color: 0xffffff }),
     )
-    scene.add(border)
+    overlayScene.add(border)
 
     const skyLight = new THREE.HemisphereLight(0xcfe8ff, 0x5a7d4a, 1.2)
     scene.add(skyLight)
@@ -419,6 +433,7 @@ export function AgentScene({
       }
 
       renderer.render(scene, camera)
+      overlayRenderer.render(overlayScene, camera)
 
       const promptEl = promptRef.current
       const nearby = nearbyVillagerRef.current
@@ -470,6 +485,9 @@ export function AgentScene({
       cancelAnimationFrame(frameId)
       mount.removeChild(renderer.domElement)
       renderer.dispose()
+      mount.removeChild(overlayRenderer.domElement)
+      overlayRenderer.dispose()
+      overlaySceneRef.current = null
       meshesRef.current.clear()
       playerMeshRef.current = null
       townMeshesRef.current.clear()
@@ -481,11 +499,11 @@ export function AgentScene({
   }, [])
 
   useEffect(() => {
-    const scene = sceneRef.current
-    if (!scene) return
+    const overlayScene = overlaySceneRef.current
+    if (!overlayScene) return
 
     for (const line of routeLinesRef.current) {
-      scene.remove(line)
+      overlayScene.remove(line)
       line.geometry.dispose()
     }
     routeLinesRef.current = []
@@ -499,7 +517,7 @@ export function AgentScene({
         points.push(new THREE.Vector3(tile.x + 0.5, ROUTE_HEIGHT, tile.y + 0.5))
       }
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), ROUTE_MATERIAL)
-      scene.add(line)
+      overlayScene.add(line)
       routeLinesRef.current.push(line)
     }
   }, [routes, agents, showRoutes])
