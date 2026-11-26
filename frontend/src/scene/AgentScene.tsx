@@ -33,8 +33,9 @@ TOON_STEPS.magFilter = THREE.NearestFilter
 TOON_STEPS.generateMipmaps = false
 TOON_STEPS.needsUpdate = true
 
+// Front faces cast shadows so a shadow starts right at a wall's base instead of leaving a lit seam.
 function toonMaterial(color: number): THREE.MeshToonMaterial {
-  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS })
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS, shadowSide: THREE.FrontSide })
 }
 
 const WATER_BANDS = 5.0
@@ -746,7 +747,8 @@ export function AgentScene({
         mesh.rotation.x = -Math.PI / 2
         mesh.position.set(centerX, style.lift, centerZ)
       }
-      mesh.receiveShadow = true
+      // Only floors receive shadows; buildings receiving them would darken their own walls.
+      mesh.receiveShadow = style.height === 0
       scene.add(mesh)
       townMeshesRef.current.set(entity.id, mesh)
 
