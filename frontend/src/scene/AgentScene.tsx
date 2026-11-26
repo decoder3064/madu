@@ -193,20 +193,40 @@ export function AgentScene({
     const PAN_Z_MIN = -PAN_MARGIN
     const PAN_Z_MAX = gridHeight + PAN_MARGIN
 
+    const artSize = () => ({
+      width: Math.floor(mount.clientWidth / PIXEL_SIZE),
+      height: Math.floor(mount.clientHeight / PIXEL_SIZE),
+    })
+
+    // The camera never turns, so its screen directions are fixed once.
+    camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
+    camera.lookAt(cameraTarget)
+    camera.updateMatrixWorld()
+    const screenRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0)
+    const screenUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1)
+
     const updateCameraPosition = () => {
       camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
-      camera.lookAt(cameraTarget)
+      // Snap to whole art pixels so still objects land on the same pixels every frame.
+      const pixel = viewHeight / artSize().height
+      const alongRight = camera.position.dot(screenRight)
+      const alongUp = camera.position.dot(screenUp)
+      camera.position.addScaledVector(screenRight, Math.round(alongRight / pixel) * pixel - alongRight)
+      camera.position.addScaledVector(screenUp, Math.round(alongUp / pixel) * pixel - alongUp)
     }
     const updateCameraFrame = () => {
-      const aspect = mount.clientWidth / mount.clientHeight
+      const { width, height } = artSize()
+      const aspect = width / height
       camera.left = (-viewHeight * aspect) / 2
       camera.right = (viewHeight * aspect) / 2
       camera.top = viewHeight / 2
       camera.bottom = -viewHeight / 2
       camera.far = CAMERA_BACKOFF * 3
       camera.updateProjectionMatrix()
+      // A zoom changes how big an art pixel is in the world, so the snap has to be redone.
+      updateCameraPosition()
     }
-    updateCameraPosition()
+    updateCameraFrame()
 
     // Projects a ground-plane (x, y) tile position to on-screen pixel
     // coordinates, for positioning the HTML prompt/bubble overlays above a
@@ -288,11 +308,9 @@ export function AgentScene({
     mount.appendChild(renderer.domElement)
 
     const handleResize = () => {
-      // Whole art pixels only, so every pixel is the same size on screen.
-      const width = Math.floor(mount.clientWidth / PIXEL_SIZE) * PIXEL_SIZE
-      const height = Math.floor(mount.clientHeight / PIXEL_SIZE) * PIXEL_SIZE
+      const { width, height } = artSize()
       updateCameraFrame()
-      renderer.setSize(width, height)
+      renderer.setSize(width * PIXEL_SIZE, height * PIXEL_SIZE)
     }
     handleResize()
     window.addEventListener('resize', handleResize)
