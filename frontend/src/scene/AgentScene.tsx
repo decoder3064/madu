@@ -26,6 +26,46 @@ const SKY_COLOR = 0xa8d4ef
 const GRASS_COLOR = 0x6a9a4f
 const SUN_COLOR = 0xffe0b0
 
+const WATER_TIME = { value: 0 }
+
+// Extends the standard lit material so the sea keeps sunlight, shadows, and fog.
+// Ripples only tilt the surface for lighting; real height changes would poke through the dock and grid.
+function makeWaterMaterial(color: number): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.1 })
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = WATER_TIME
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uTime;
+varying vec2 vWaterPos;`,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `vWaterPos = position.xy;
+float diagonal = 0.15 * cos((position.x + position.y) * 0.9 + uTime * 1.7);
+float slopeX = 0.25 * cos(position.x * 0.6 + uTime * 1.1) + diagonal;
+float slopeY = 0.25 * cos(position.y * 0.45 + uTime * 0.8) + diagonal;
+vec3 objectNormal = normalize(vec3(-slopeX, -slopeY, 1.0));`,
+      )
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uTime;
+varying vec2 vWaterPos;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+float shimmer = sin(vWaterPos.x * 1.3 + uTime * 1.5) * sin(vWaterPos.y * 1.1 - uTime * 1.2);
+diffuseColor.rgb += shimmer * 0.05;`,
+      )
+  }
+  return material
+}
+
 const BODY_HEIGHT = 0.5
 // Matches the server: one tile per 0.5-second tick.
 const MIN_GLIDE_SPEED = 2
@@ -317,6 +357,7 @@ export function AgentScene({
     let frameId: number
     const animate = () => {
       const delta = clock.getDelta()
+      WATER_TIME.value = clock.elapsedTime
       for (const mesh of meshesRef.current.values()) {
         glide(mesh, delta, clock.elapsedTime)
       }
@@ -513,7 +554,10 @@ export function AgentScene({
     for (const entity of town) {
       if (townMeshesRef.current.has(entity.id)) continue
       const style = KIND_STYLES[entity.kind] ?? UNKNOWN_KIND_STYLE
-      const material = new THREE.MeshStandardMaterial({ color: style.color })
+      const isWater = entity.kind === 'water'
+      const material = isWater
+        ? makeWaterMaterial(style.color)
+        : new THREE.MeshStandardMaterial({ color: style.color })
       const centerX = entity.x + entity.width / 2
       const centerZ = entity.y + entity.height / 2
 
@@ -526,7 +570,12 @@ export function AgentScene({
         mesh.position.set(centerX, style.height / 2, centerZ)
         mesh.castShadow = true
       } else {
-        mesh = new THREE.Mesh(new THREE.PlaneGeometry(entity.width, entity.height), material)
+        const segmentsAcross = isWater ? entity.width : 1
+        const segmentsDown = isWater ? entity.height : 1
+        mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(entity.width, entity.height, segmentsAcross, segmentsDown),
+          material,
+        )
         mesh.rotation.x = -Math.PI / 2
         mesh.position.set(centerX, style.lift, centerZ)
       }
