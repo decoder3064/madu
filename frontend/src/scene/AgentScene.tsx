@@ -33,9 +33,8 @@ TOON_STEPS.magFilter = THREE.NearestFilter
 TOON_STEPS.generateMipmaps = false
 TOON_STEPS.needsUpdate = true
 
-// Front faces cast shadows so a shadow starts right at a wall's base instead of leaving a lit seam.
 function toonMaterial(color: number): THREE.MeshToonMaterial {
-  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS, shadowSide: THREE.FrontSide })
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS })
 }
 
 const WATER_BANDS = 5.0
@@ -118,8 +117,8 @@ function glide(mesh: THREE.Mesh, delta: number, time: number) {
 // Screen pixels per art pixel. Higher is chunkier.
 const PIXEL_SIZE = 3
 
-const OUTLINE_DARKEN = 0.45
-const CREASE_DARKEN = 0.8
+const OUTLINE_DARKEN = 0.8
+const CREASE_DARKEN = 1.0
 // A depth jump counts as an edge only past this many pixels' worth. Flat ground tilted at 30 degrees
 // rises about 1.7 pixels' worth per pixel, so anything below that would outline the whole floor.
 const OUTLINE_DEPTH_GAP_PIXELS = 2.5
@@ -148,7 +147,7 @@ void checkNeighbor(vec2 offset, float depth, vec3 normal, inout float outline, i
   // Only the nearer side of an edge darkens, so outlines stay one pixel wide.
   if (neighborDepth - depth > depthGap) {
     outline = 1.0;
-  } else if (abs(neighborDepth - depth) < depthGap && dot(normal, neighborNormal) < ${CREASE_NORMAL_DOT}) {
+  } else if (abs(neighborDepth - depth) < depthGap && dot(normal, neighborNormal) < ${CREASE_NORMAL_DOT.toFixed(2)}) {
     crease = 1.0;
   }
 }
@@ -164,9 +163,9 @@ void main() {
   checkNeighbor(vec2(0.0, 1.0), depth, normal, outline, crease);
   checkNeighbor(vec2(0.0, -1.0), depth, normal, outline, crease);
   if (outline > 0.0) {
-    color.rgb *= ${OUTLINE_DARKEN};
+    color.rgb *= ${OUTLINE_DARKEN.toFixed(2)};
   } else if (crease > 0.0) {
-    color.rgb *= ${CREASE_DARKEN};
+    color.rgb *= ${CREASE_DARKEN.toFixed(2)};
   }
   gl_FragColor = color;
   #include <colorspace_fragment>
