@@ -22,6 +22,10 @@ const BORDER_HEIGHT = 0.06
 const ROUTE_HEIGHT = 0.15
 const ROUTE_MATERIAL = new THREE.LineBasicMaterial({ color: 0xffcc00 })
 
+const SKY_COLOR = 0xa8d4ef
+const GRASS_COLOR = 0x6a9a4f
+const SUN_COLOR = 0xffe0b0
+
 const BODY_HEIGHT = 0.5
 // Matches the server: one tile per 0.5-second tick.
 const MIN_GLIDE_SPEED = 2
@@ -111,7 +115,7 @@ export function AgentScene({
     if (!mount) return
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x1a1a2e)
+    scene.background = new THREE.Color(SKY_COLOR)
     sceneRef.current = scene
 
     const camera = new THREE.PerspectiveCamera(
@@ -126,6 +130,8 @@ export function AgentScene({
     // narrow board doesn't stop you from getting close).
     const gridSpan = Math.max(gridWidth, gridHeight)
     const gridMinSpan = Math.min(gridWidth, gridHeight)
+    // Fog starts past the default view so only far, zoomed-out edges fade.
+    scene.fog = new THREE.Fog(SKY_COLOR, gridSpan * 0.9, gridSpan * 2.2)
 
     const cameraTarget = new THREE.Vector3(gridWidth / 2, 0, gridHeight / 2)
     const cameraDirection = new THREE.Vector3(0, gridSpan * 0.8, gridSpan * 0.8).normalize()
@@ -221,6 +227,8 @@ export function AgentScene({
     mount.addEventListener('pointercancel', handlePointerUp)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true })
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
     mount.appendChild(renderer.domElement)
 
     const handleResize = () => {
@@ -235,8 +243,9 @@ export function AgentScene({
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(gridWidth, gridHeight),
-      new THREE.MeshStandardMaterial({ color: 0x3a5a40 }),
+      new THREE.MeshStandardMaterial({ color: GRASS_COLOR }),
     )
+    ground.receiveShadow = true
     ground.rotation.x = -Math.PI / 2
     ground.position.set(gridWidth / 2, 0, gridHeight / 2)
     scene.add(ground)
@@ -277,11 +286,26 @@ export function AgentScene({
     )
     scene.add(border)
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
-    scene.add(ambientLight)
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
-    directionalLight.position.set(10, 20, 10)
-    scene.add(directionalLight)
+    const skyLight = new THREE.HemisphereLight(0xcfe8ff, 0x5a7d4a, 1.2)
+    scene.add(skyLight)
+
+    const sun = new THREE.DirectionalLight(SUN_COLOR, 2.2)
+    sun.position.set(gridWidth / 2 - gridSpan * 0.4, gridSpan * 0.6, gridHeight / 2 - gridSpan * 0.3)
+    sun.target.position.set(gridWidth / 2, 0, gridHeight / 2)
+    sun.castShadow = true
+    sun.shadow.mapSize.set(2048, 2048)
+    // The shadow camera has to cover the whole board or shadows get cut off at its edge.
+    const shadowReach = gridSpan * 0.75
+    sun.shadow.camera.left = -shadowReach
+    sun.shadow.camera.right = shadowReach
+    sun.shadow.camera.top = shadowReach
+    sun.shadow.camera.bottom = -shadowReach
+    sun.shadow.camera.near = 1
+    sun.shadow.camera.far = gridSpan * 3
+    sun.shadow.bias = -0.0005
+    sun.shadow.normalBias = 0.02
+    scene.add(sun)
+    scene.add(sun.target)
 
     const clock = new THREE.Clock()
     const screenSpotOf = (villager: Villager) => {
@@ -438,6 +462,7 @@ export function AgentScene({
         const geometry = new THREE.IcosahedronGeometry(0.4, 0)
         const material = new THREE.MeshStandardMaterial({ color: 0xe8a87c })
         mesh = new THREE.Mesh(geometry, material)
+        mesh.castShadow = true
         scene.add(mesh)
         meshesRef.current.set(agent.id, mesh)
         mesh.position.set(agent.x + 0.5, BODY_HEIGHT, agent.y + 0.5)
@@ -470,6 +495,7 @@ export function AgentScene({
       const geometry = new THREE.TetrahedronGeometry(0.5, 0)
       const material = new THREE.MeshStandardMaterial({ color: 0xffff00 })
       mesh = new THREE.Mesh(geometry, material)
+      mesh.castShadow = true
       scene.add(mesh)
       playerMeshRef.current = mesh
       mesh.position.set(player.x + 0.5, BODY_HEIGHT, player.y + 0.5)
@@ -498,11 +524,13 @@ export function AgentScene({
           material,
         )
         mesh.position.set(centerX, style.height / 2, centerZ)
+        mesh.castShadow = true
       } else {
         mesh = new THREE.Mesh(new THREE.PlaneGeometry(entity.width, entity.height), material)
         mesh.rotation.x = -Math.PI / 2
         mesh.position.set(centerX, style.lift, centerZ)
       }
+      mesh.receiveShadow = true
       scene.add(mesh)
       townMeshesRef.current.set(entity.id, mesh)
 
