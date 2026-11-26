@@ -2,8 +2,8 @@ from collections import deque
 
 from app.world.grid import Grid
 from app.world.town import load_town
-from app.world.walkability import WalkableMap
-from tests.helpers import blocker
+from app.world.walkability import GRASS_COST, WalkableMap
+from tests.helpers import blocker, map_from_text
 
 
 def test_open_ground_is_walkable():
@@ -58,3 +58,28 @@ def test_every_walkable_place_can_be_reached_from_the_plaza():
     for entity in town.entities:
         if not entity.blocks:
             assert (entity.x, entity.y) in reached, entity.name
+
+
+def test_open_ground_costs_grass_by_default():
+    walkable = map_from_text(["..."]).walkable
+    assert walkable.step_cost(1, 0) == GRASS_COST
+    assert walkable.cheapest_cost == GRASS_COST
+
+
+def test_surfaces_set_their_price_and_the_cheapest_is_remembered():
+    walkable = map_from_text(["r.s"]).walkable
+    assert walkable.step_cost(0, 0) == 1.0
+    assert walkable.step_cost(1, 0) == GRASS_COST
+    assert walkable.step_cost(2, 0) == 1.5
+    assert walkable.cheapest_cost == 1.0
+
+
+def test_real_town_prices_each_surface():
+    town = load_town()
+    blockers = [entity for entity in town.entities if entity.blocks]
+    surfaces = [entity for entity in town.entities if not entity.blocks]
+    walkable = WalkableMap(Grid(town.width, town.height), blockers, surfaces)
+    assert walkable.step_cost(60, 50) == 1.0
+    assert walkable.step_cost(40, 80) == 1.5
+    assert walkable.step_cost(35, 60) == GRASS_COST
+    assert walkable.step_cost(50, 90) == 1.0

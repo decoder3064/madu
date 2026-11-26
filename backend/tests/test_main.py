@@ -57,3 +57,54 @@ def test_websocket_ignores_malformed_message_and_still_processes_next_move():
             payload = json.loads(data)
 
             assert payload["player"] == {"id": "player-1", "x": 58, "y": 54}
+
+
+def _tomas_x(payload):
+    for agent in payload["agents"]:
+        if agent["id"] == "villager-2":
+            return agent["x"]
+
+
+def test_go_to_sends_tomas_west_toward_bens_house():
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.receive_text()  # initial state, ignore
+            websocket.send_text(
+                json.dumps({"type": "go_to", "villager_id": "villager-2", "place_id": "ben-house"})
+            )
+            latest = None
+            for _ in range(3):
+                latest = json.loads(websocket.receive_text())
+            assert _tomas_x(latest) < 60
+
+
+def test_go_to_with_unknown_names_is_ignored_and_moves_still_work():
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.receive_text()  # initial state, ignore
+            websocket.send_text(
+                json.dumps({"type": "go_to", "villager_id": "nobody", "place_id": "nowhere"})
+            )
+            websocket.send_text(json.dumps({"type": "move", "direction": "up"}))
+            payload = json.loads(websocket.receive_text())
+            assert payload["player"] == {"id": "player-1", "x": 58, "y": 54}
+
+
+def test_go_to_broadcasts_the_route_ending_beside_bens_house():
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.receive_text()  # initial state, ignore
+            websocket.send_text(
+                json.dumps({"type": "go_to", "villager_id": "villager-2", "place_id": "ben-house"})
+            )
+            route = None
+            for _ in range(3):
+                payload = json.loads(websocket.receive_text())
+                route = payload["routes"].get("villager-2")
+                if route:
+                    break
+            assert route is not None
+            assert route[-1][0] == 34

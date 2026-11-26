@@ -5,11 +5,12 @@ import { useDevModeToggle } from './hooks/useDevModeToggle'
 import { useTalkTrigger } from './hooks/useTalkTrigger'
 import { findNearbyVillager } from './hooks/findNearbyVillager'
 import { AgentScene } from './scene/AgentScene'
+import { DevPanel } from './DevPanel'
 
 const TALK_DISMISS_MS = 4000
 
 function App() {
-  const { agents, player, town, gridSize, talkRangeTiles, sendMove } =
+  const { agents, player, town, routes, gridSize, talkRangeTiles, sendMove, sendGoTo } =
     useGameConnection('ws://localhost:8420/ws')
   useKeyboardMovement(sendMove)
   const devMode = useDevModeToggle()
@@ -40,19 +41,28 @@ function App() {
   const talkingVillager =
     agents.find((villager) => villager.id === talkingVillagerId) ?? null
 
+  const places = [...town].sort((a, b) => a.name.localeCompare(b.name))
+
   if (!gridSize) return null
 
   return (
-    <AgentScene
-      agents={agents}
-      player={player}
-      town={town}
-      gridWidth={gridSize.width}
-      gridHeight={gridSize.height}
-      showGridLines={devMode}
-      nearbyVillager={talkingVillager ? null : nearbyVillager}
-      talkingVillager={talkingVillager}
-    />
+    <div style={{ position: 'relative' }}>
+      <AgentScene
+        agents={agents}
+        player={player}
+        town={town}
+        gridWidth={gridSize.width}
+        gridHeight={gridSize.height}
+        showGridLines={devMode}
+        nearbyVillager={talkingVillager ? null : nearbyVillager}
+        talkingVillager={talkingVillager}
+        routes={routes}
+        showRoutes={devMode}
+      />
+      {devMode && (
+        <DevPanel villagers={agents} places={places} routes={routes} onGoTo={sendGoTo} />
+      )}
+    </div>
   )
 }
 

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { AgentPosition } from '../hooks/parseAgentsMessage'
 import { TownEntity } from '../hooks/parseTownMessage'
 import { Villager } from '../hooks/mergeVillagerData'
+import { RouteTile } from '../hooks/parseRoutesMessage'
 
 // Flat kinds get a tiny lift each so overlapping floors don't flicker; the dock sits above the sea.
 const KIND_STYLES: Record<string, { color: number; height: number; lift: number }> = {
@@ -14,6 +15,9 @@ const KIND_STYLES: Record<string, { color: number; height: number; lift: number 
   landmark: { color: 0xc4c4c4, height: 3, lift: 0 },
 }
 const UNKNOWN_KIND_STYLE = { color: 0xff00ff, height: 1, lift: 0 }
+
+const ROUTE_HEIGHT = 0.15
+const ROUTE_MATERIAL = new THREE.LineBasicMaterial({ color: 0xffcc00 })
 
 const FOLLOW_EDGE_FRACTION = 0.2
 const FOLLOW_SPEED = 0.1
@@ -38,6 +42,8 @@ interface AgentSceneProps {
   showGridLines: boolean
   nearbyVillager: Villager | null
   talkingVillager: Villager | null
+  routes: Map<string, RouteTile[]>
+  showRoutes: boolean
 }
 
 export function AgentScene({
@@ -49,6 +55,8 @@ export function AgentScene({
   showGridLines,
   nearbyVillager,
   talkingVillager,
+  routes,
+  showRoutes,
 }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -59,6 +67,7 @@ export function AgentScene({
   const labelLayerRef = useRef<HTMLDivElement>(null)
   const playerPositionRef = useRef<AgentPosition | null>(null)
   const followRequestedRef = useRef(false)
+  const routeLinesRef = useRef<THREE.Line[]>([])
   const gridLinesRef = useRef<THREE.LineSegments | null>(null)
   const promptRef = useRef<HTMLDivElement>(null)
   const bubbleRef = useRef<HTMLDivElement>(null)
@@ -320,9 +329,34 @@ export function AgentScene({
       townMeshesRef.current.clear()
       for (const { element } of townLabelsRef.current) element.remove()
       townLabelsRef.current = []
+      routeLinesRef.current = []
       gridLinesRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    for (const line of routeLinesRef.current) {
+      scene.remove(line)
+      line.geometry.dispose()
+    }
+    routeLinesRef.current = []
+    if (!showRoutes) return
+
+    for (const agent of agents) {
+      const route = routes.get(agent.id)
+      if (!route || route.length === 0) continue
+      const points = [new THREE.Vector3(agent.x + 0.5, ROUTE_HEIGHT, agent.y + 0.5)]
+      for (const tile of route) {
+        points.push(new THREE.Vector3(tile.x + 0.5, ROUTE_HEIGHT, tile.y + 0.5))
+      }
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), ROUTE_MATERIAL)
+      scene.add(line)
+      routeLinesRef.current.push(line)
+    }
+  }, [routes, agents, showRoutes])
 
   useEffect(() => {
     if (gridLinesRef.current) {

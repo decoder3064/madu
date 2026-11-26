@@ -18,11 +18,13 @@ class TownEntity(Entity):
         y: int,
         width: int,
         height: int,
+        walk_cost: float | None = None,
     ):
         super().__init__(entity_id=entity_id, x=x, y=y, width=width, height=height)
         self.name = name
         self.kind = kind
         self.blocks = blocks
+        self.walk_cost = walk_cost
 
     def to_dict(self) -> dict:
         return {
@@ -64,6 +66,7 @@ def load_town(path: Path = DEFAULT_TOWN_PATH) -> Town:
                 y=top_row,
                 width=width,
                 height=height,
+                walk_cost=raw.get("walk_cost"),
             )
         )
 
