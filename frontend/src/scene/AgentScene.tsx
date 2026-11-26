@@ -1,13 +1,35 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { AgentPosition } from '../hooks/parseAgentsMessage'
-import { BuildingFootprint } from '../hooks/parseBuildingsMessage'
+import { TownEntity } from '../hooks/parseTownMessage'
 import { Villager } from '../hooks/mergeVillagerData'
+
+// Flat kinds get a tiny lift each so overlapping floors don't flicker; the dock sits above the sea.
+const KIND_STYLES: Record<string, { color: number; height: number; lift: number }> = {
+  zone: { color: 0xd9c38c, height: 0, lift: 0.01 },
+  water: { color: 0x2b6cb0, height: 0, lift: 0.02 },
+  dock: { color: 0x8b5a2b, height: 0, lift: 0.03 },
+  forest: { color: 0x1f4d2b, height: 1.5, lift: 0 },
+  building: { color: 0x8a8a8a, height: 2, lift: 0 },
+  landmark: { color: 0xc4c4c4, height: 3, lift: 0 },
+}
+const UNKNOWN_KIND_STYLE = { color: 0xff00ff, height: 1, lift: 0 }
+
+const LABEL_STYLE: Partial<CSSStyleDeclaration> = {
+  position: 'absolute',
+  transform: 'translate(-50%, -50%)',
+  color: 'white',
+  fontSize: '11px',
+  fontFamily: 'sans-serif',
+  textShadow: '0 0 3px black',
+  whiteSpace: 'nowrap',
+  pointerEvents: 'none',
+}
 
 interface AgentSceneProps {
   agents: Villager[]
   player: AgentPosition | null
-  buildings: BuildingFootprint[]
+  town: TownEntity[]
   gridWidth: number
   gridHeight: number
   showGridLines: boolean
@@ -18,7 +40,7 @@ interface AgentSceneProps {
 export function AgentScene({
   agents,
   player,
-  buildings,
+  town,
   gridWidth,
   gridHeight,
   showGridLines,
@@ -29,7 +51,9 @@ export function AgentScene({
   const sceneRef = useRef<THREE.Scene | null>(null)
   const meshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const playerMeshRef = useRef<THREE.Mesh | null>(null)
-  const buildingMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
+  const townMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
+  const townLabelsRef = useRef<{ entity: TownEntity; element: HTMLDivElement }[]>([])
+  const labelLayerRef = useRef<HTMLDivElement>(null)
   const gridLinesRef = useRef<THREE.LineSegments | null>(null)
   const promptRef = useRef<HTMLDivElement>(null)
   const bubbleRef = useRef<HTMLDivElement>(null)
@@ -243,6 +267,15 @@ export function AgentScene({
         }
       }
 
+      for (const { entity, element } of townLabelsRef.current) {
+        const { left, top } = projectToScreen(
+          entity.x + entity.width / 2 - 0.5,
+          entity.y + entity.height / 2 - 0.5,
+        )
+        element.style.left = `${left}px`
+        element.style.top = `${top}px`
+      }
+
       frameId = requestAnimationFrame(animate)
     }
     animate()
@@ -259,7 +292,9 @@ export function AgentScene({
       renderer.dispose()
       meshesRef.current.clear()
       playerMeshRef.current = null
-      buildingMeshesRef.current.clear()
+      townMeshesRef.current.clear()
+      for (const { element } of townLabelsRef.current) element.remove()
+      townLabelsRef.current = []
       gridLinesRef.current = null
     }
   }, [])
@@ -331,23 +366,45 @@ export function AgentScene({
     const scene = sceneRef.current
     if (!scene) return
 
-    for (const building of buildings) {
-      if (buildingMeshesRef.current.has(building.id)) continue
-      const geometry = new THREE.BoxGeometry(building.width, 2, building.height)
-      const material = new THREE.MeshStandardMaterial({ color: 0x808080 })
-      const mesh = new THREE.Mesh(geometry, material)
-      mesh.position.set(
-        building.x + building.width / 2,
-        1,
-        building.y + building.height / 2,
-      )
+    const labelLayer = labelLayerRef.current
+    if (!labelLayer) return
+
+    for (const entity of town) {
+      if (townMeshesRef.current.has(entity.id)) continue
+      const style = KIND_STYLES[entity.kind] ?? UNKNOWN_KIND_STYLE
+      const material = new THREE.MeshStandardMaterial({ color: style.color })
+      const centerX = entity.x + entity.width / 2
+      const centerZ = entity.y + entity.height / 2
+
+      let mesh: THREE.Mesh
+      if (style.height > 0) {
+        mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(entity.width, style.height, entity.height),
+          material,
+        )
+        mesh.position.set(centerX, style.height / 2, centerZ)
+      } else {
+        mesh = new THREE.Mesh(new THREE.PlaneGeometry(entity.width, entity.height), material)
+        mesh.rotation.x = -Math.PI / 2
+        mesh.position.set(centerX, style.lift, centerZ)
+      }
       scene.add(mesh)
-      buildingMeshesRef.current.set(building.id, mesh)
+      townMeshesRef.current.set(entity.id, mesh)
+
+      const label = document.createElement('div')
+      label.textContent = entity.name
+      Object.assign(label.style, LABEL_STYLE)
+      labelLayer.appendChild(label)
+      townLabelsRef.current.push({ entity, element: label })
     }
-  }, [buildings])
+  }, [town])
 
   return (
     <div ref={mountRef} style={{ width: '100%', height: '100vh', position: 'relative' }}>
+      <div
+        ref={labelLayerRef}
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+      />
       <div
         ref={promptRef}
         style={{

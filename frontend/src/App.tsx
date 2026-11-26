@@ -9,7 +9,7 @@ import { AgentScene } from './scene/AgentScene'
 const TALK_DISMISS_MS = 4000
 
 function App() {
-  const { agents, player, buildings, gridSize, talkRangeTiles, sendMove } =
+  const { agents, player, town, gridSize, talkRangeTiles, sendMove } =
     useGameConnection('ws://localhost:8420/ws')
   useKeyboardMovement(sendMove)
   const devMode = useDevModeToggle()
@@ -46,7 +46,7 @@ function App() {
     <AgentScene
       agents={agents}
       player={player}
-      buildings={buildings}
+      town={town}
       gridWidth={gridSize.width}
       gridHeight={gridSize.height}
       showGridLines={devMode}

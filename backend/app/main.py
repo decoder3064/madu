@@ -6,19 +6,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from app.core.config import (
-    GRID_WIDTH,
-    GRID_HEIGHT,
     TICK_INTERVAL_SECONDS,
     PLAYER_START_ID,
     PLAYER_START_X,
     PLAYER_START_Y,
-    BUILDING_SIZE,
-    BUILDING_1_ID,
-    BUILDING_1_X,
-    BUILDING_1_Y,
-    BUILDING_2_ID,
-    BUILDING_2_X,
-    BUILDING_2_Y,
     HITBOXES_ENABLED,
     TALK_RANGE_TILES,
 )
@@ -26,7 +17,7 @@ from app.core.villagers import VILLAGERS
 from app.world.grid import Grid
 from app.world.agent import Agent
 from app.world.player import Player
-from app.world.building import Building
+from app.world.town import load_town
 from app.world.simulation import Simulation
 from app.world.movement import apply_move
 from app.persistence.store import Store
@@ -45,11 +36,11 @@ def _state_payload(agents, player) -> dict:
     }
 
 
-def _initial_payload(agents, player, buildings, grid, talk_range_tiles) -> dict:
+def _initial_payload(agents, player, town_entities, grid, talk_range_tiles) -> dict:
     return {
         "agents": [agent.to_dict() for agent in agents],
         "player": player.to_dict(),
-        "buildings": [building.to_dict() for building in buildings],
+        "town": [entity.to_dict() for entity in town_entities],
         "grid_width": grid.width,
         "grid_height": grid.height,
         "talk_range_tiles": talk_range_tiles,
@@ -57,8 +48,10 @@ def _initial_payload(agents, player, buildings, grid, talk_range_tiles) -> dict:
 
 
 def create_app() -> FastAPI:
+    town = load_town()
+    blockers = [entity for entity in town.entities if entity.blocks]
     store = Store(
-        Grid(GRID_WIDTH, GRID_HEIGHT),
+        Grid(town.width, town.height),
         [
             Agent(
                 agent_id=v.id,
@@ -72,14 +65,7 @@ def create_app() -> FastAPI:
             for v in VILLAGERS
         ],
         Player(player_id=PLAYER_START_ID, x=PLAYER_START_X, y=PLAYER_START_Y),
-        [
-            Building(
-                building_id=BUILDING_1_ID, x=BUILDING_1_X, y=BUILDING_1_Y, size=BUILDING_SIZE
-            ),
-            Building(
-                building_id=BUILDING_2_ID, x=BUILDING_2_X, y=BUILDING_2_Y, size=BUILDING_SIZE
-            ),
-        ],
+        blockers,
     )
     simulation = Simulation(store, hitboxes_enabled=HITBOXES_ENABLED)
     manager = ConnectionManager()
@@ -110,7 +96,7 @@ def create_app() -> FastAPI:
                     _initial_payload(
                         store.get_agents(),
                         store.get_player(),
-                        store.get_buildings(),
+                        town.entities,
                         store.get_grid(),
                         TALK_RANGE_TILES,
                     )

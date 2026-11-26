@@ -1,7 +1,7 @@
 import pytest
 
 from app.world.grid import Grid
-from app.world.building import Building
+from tests.helpers import blocker
 from app.world.movement import apply_move
 
 
@@ -53,7 +53,7 @@ def test_apply_move_raises_for_invalid_direction():
 
 def test_apply_move_blocked_by_building_when_hitboxes_enabled():
     grid = Grid(width=20, height=20)
-    building = Building(building_id="b1", x=11, y=10, size=5)
+    building = blocker("b1", x=11, y=10, size=5)
     assert apply_move(
         grid, 10, 10, "right", buildings=[building], hitboxes_enabled=True
     ) == (10, 10)
@@ -61,7 +61,7 @@ def test_apply_move_blocked_by_building_when_hitboxes_enabled():
 
 def test_apply_move_ignores_building_when_hitboxes_disabled():
     grid = Grid(width=20, height=20)
-    building = Building(building_id="b1", x=11, y=10, size=5)
+    building = blocker("b1", x=11, y=10, size=5)
     assert apply_move(
         grid, 10, 10, "right", buildings=[building], hitboxes_enabled=False
     ) == (11, 10)

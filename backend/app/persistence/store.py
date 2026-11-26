@@ -1,7 +1,7 @@
 from app.world.grid import Grid
 from app.world.agent import Agent
 from app.world.player import Player
-from app.world.building import Building
+from app.world.town import TownEntity
 
 
 class Store:
@@ -10,7 +10,7 @@ class Store:
         grid: Grid,
         agents: list[Agent],
         player: Player,
-        buildings: list[Building],
+        buildings: list[TownEntity],
     ):
         self._grid = grid
         self._agents = {agent.id: agent for agent in agents}
@@ -37,5 +37,5 @@ class Store:
         self._player.x = x
         self._player.y = y
 
-    def get_buildings(self) -> list[Building]:
+    def get_buildings(self) -> list[TownEntity]:
         return self._buildings

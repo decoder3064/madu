@@ -7,44 +7,26 @@ def test_websocket_sends_initial_state_on_connect():
     app = create_app()
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
-            data = websocket.receive_text()
-            payload = json.loads(data)
-            assert payload == {
-                "agents": [
-                    {
-                        "id": "villager-1",
-                        "x": 10,
-                        "y": 10,
-                        "name": "Mira",
-                        "role": "Fisherwoman",
-                        "line": "The tide's been good to us this week.",
-                    },
-                    {
-                        "id": "villager-2",
-                        "x": 25,
-                        "y": 10,
-                        "name": "Tomas",
-                        "role": "Baker",
-                        "line": "Fresh bread every morning — come by before it's gone.",
-                    },
-                    {
-                        "id": "villager-3",
-                        "x": 17,
-                        "y": 25,
-                        "name": "Elena",
-                        "role": "Merchant",
-                        "line": "Business is slow, but the view of the harbor makes up for it.",
-                    },
-                ],
-                "player": {"id": "player-1", "x": 5, "y": 5},
-                "buildings": [
-                    {"id": "building-1", "x": 15, "y": 15, "width": 5, "height": 5},
-                    {"id": "building-2", "x": 35, "y": 35, "width": 5, "height": 5},
-                ],
-                "grid_width": 100,
-                "grid_height": 100,
-                "talk_range_tiles": 3,
+            payload = json.loads(websocket.receive_text())
+
+            assert payload["grid_width"] == 100
+            assert payload["grid_height"] == 100
+            assert payload["talk_range_tiles"] == 3
+            assert payload["player"] == {"id": "player-1", "x": 58, "y": 55}
+            assert payload["agents"][0] == {
+                "id": "villager-1",
+                "x": 45,
+                "y": 80,
+                "name": "Mira",
+                "role": "Fisherwoman",
+                "line": "The tide's been good to us this week.",
             }
+
+            town_by_id = {entity["id"]: entity for entity in payload["town"]}
+            assert len(town_by_id) == 16
+            assert town_by_id["kai-house"]["blocks"] is True
+            assert town_by_id["plaza"]["blocks"] is False
+            assert "buildings" not in payload
 
 
 def test_websocket_applies_valid_move_and_broadcasts_new_state():
@@ -57,10 +39,10 @@ def test_websocket_applies_valid_move_and_broadcasts_new_state():
             data = websocket.receive_text()
             payload = json.loads(data)
 
-            assert payload["player"] == {"id": "player-1", "x": 5, "y": 4}
-            assert "buildings" not in payload
+            assert payload["player"] == {"id": "player-1", "x": 58, "y": 54}
+            assert "town" not in payload
             assert "talk_range_tiles" not in payload
-            assert payload["agents"][0] == {"id": "villager-1", "x": 10, "y": 10}
+            assert payload["agents"][0] == {"id": "villager-1", "x": 45, "y": 80}
 
 
 def test_websocket_ignores_malformed_message_and_still_processes_next_move():
@@ -74,4 +56,4 @@ def test_websocket_ignores_malformed_message_and_still_processes_next_move():
             data = websocket.receive_text()
             payload = json.loads(data)
 
-            assert payload["player"] == {"id": "player-1", "x": 5, "y": 4}
+            assert payload["player"] == {"id": "player-1", "x": 58, "y": 54}
