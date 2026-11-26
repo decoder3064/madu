@@ -16,6 +16,9 @@ const KIND_STYLES: Record<string, { color: number; height: number; lift: number 
 }
 const UNKNOWN_KIND_STYLE = { color: 0xff00ff, height: 1, lift: 0 }
 
+// Above every floor lift so lines never tie with a floor.
+const GRID_LINE_HEIGHT = 0.05
+const BORDER_HEIGHT = 0.06
 const ROUTE_HEIGHT = 0.15
 const ROUTE_MATERIAL = new THREE.LineBasicMaterial({ color: 0xffcc00 })
 
@@ -213,10 +216,10 @@ export function AgentScene({
     // square) so the lines exactly match a non-square board's real shape.
     const gridLinePoints: number[] = []
     for (let x = 0; x <= gridWidth; x++) {
-      gridLinePoints.push(x, 0.01, 0, x, 0.01, gridHeight)
+      gridLinePoints.push(x, GRID_LINE_HEIGHT, 0, x, GRID_LINE_HEIGHT, gridHeight)
     }
     for (let z = 0; z <= gridHeight; z++) {
-      gridLinePoints.push(0, 0.01, z, gridWidth, 0.01, z)
+      gridLinePoints.push(0, GRID_LINE_HEIGHT, z, gridWidth, GRID_LINE_HEIGHT, z)
     }
     const gridLineGeometry = new THREE.BufferGeometry()
     gridLineGeometry.setAttribute(
@@ -232,11 +235,11 @@ export function AgentScene({
     gridLinesRef.current = gridLines
 
     const borderPoints = [
-      new THREE.Vector3(0, 0.02, 0),
-      new THREE.Vector3(gridWidth, 0.02, 0),
-      new THREE.Vector3(gridWidth, 0.02, gridHeight),
-      new THREE.Vector3(0, 0.02, gridHeight),
-      new THREE.Vector3(0, 0.02, 0),
+      new THREE.Vector3(0, BORDER_HEIGHT, 0),
+      new THREE.Vector3(gridWidth, BORDER_HEIGHT, 0),
+      new THREE.Vector3(gridWidth, BORDER_HEIGHT, gridHeight),
+      new THREE.Vector3(0, BORDER_HEIGHT, gridHeight),
+      new THREE.Vector3(0, BORDER_HEIGHT, 0),
     ]
     const borderGeometry = new THREE.BufferGeometry().setFromPoints(borderPoints)
     const border = new THREE.Line(
