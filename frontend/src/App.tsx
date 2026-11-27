@@ -10,6 +10,8 @@ import { useViewRotation } from './hooks/useViewRotation'
 import { gridDirectionForKey } from './hooks/viewRotation'
 import { CameraPicker, PLAYER_TARGET } from './CameraPicker'
 import { useFollowMeKey } from './hooks/useFollowMeKey'
+import { ZoomControls, ZOOM_MAX_LEVEL, ZOOM_MIN_LEVEL } from './ZoomControls'
+import { useZoomKeys } from './hooks/useZoomKeys'
 
 const TALK_DISMISS_MS = 4000
 
@@ -19,6 +21,10 @@ function App() {
   const viewTurns = useViewRotation()
   const [followTarget, setFollowTarget] = useState<string | null>(PLAYER_TARGET)
   useFollowMeKey(() => setFollowTarget(PLAYER_TARGET))
+  const [zoomLevel, setZoomLevel] = useState(0)
+  const zoomIn = () => setZoomLevel((level) => Math.min(ZOOM_MAX_LEVEL, level + 1))
+  const zoomOut = () => setZoomLevel((level) => Math.max(ZOOM_MIN_LEVEL, level - 1))
+  useZoomKeys(zoomIn, zoomOut)
   useKeyboardMovement((key) => sendMove(gridDirectionForKey(key, viewTurns)))
   const devMode = useDevModeToggle()
 
@@ -68,8 +74,10 @@ function App() {
         viewTurns={viewTurns}
         followTarget={followTarget}
         onFollowChange={setFollowTarget}
+        zoomLevel={zoomLevel}
       />
       <CameraPicker villagers={agents} followTarget={followTarget} onChange={setFollowTarget} />
+      <ZoomControls level={zoomLevel} onZoomIn={zoomIn} onZoomOut={zoomOut} />
       {devMode && (
         <DevPanel villagers={agents} places={places} routes={routes} onGoTo={sendGoTo} />
       )}

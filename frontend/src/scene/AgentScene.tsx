@@ -214,6 +214,8 @@ void main() {
 
 
 const TURN_SPEED = 8
+const ZOOM_STEP = 1.25
+const ZOOM_SPEED = 10
 // About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
 const ISO_PITCH = Math.PI / 6
 
@@ -248,6 +250,7 @@ interface AgentSceneProps {
   viewTurns: number
   followTarget: string | null
   onFollowChange: (target: string | null) => void
+  zoomLevel: number
 }
 
 export function AgentScene({
@@ -264,6 +267,7 @@ export function AgentScene({
   viewTurns,
   followTarget,
   onFollowChange,
+  zoomLevel,
 }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -275,6 +279,11 @@ export function AgentScene({
   const labelLayerRef = useRef<HTMLDivElement>(null)
   const followTargetRef = useRef(followTarget)
   const onFollowChangeRef = useRef(onFollowChange)
+  const zoomLevelRef = useRef(zoomLevel)
+
+  useEffect(() => {
+    zoomLevelRef.current = zoomLevel
+  }, [zoomLevel])
 
   useEffect(() => {
     followTargetRef.current = followTarget
@@ -315,7 +324,8 @@ export function AgentScene({
     const CAMERA_BACKOFF = gridSpan * 2
     const MIN_VIEW_HEIGHT = gridMinSpan * 0.1
     const MAX_VIEW_HEIGHT = gridSpan * 1.3
-    let viewHeight = gridSpan * 0.6
+    const DEFAULT_VIEW_HEIGHT = gridSpan * 0.6
+    let viewHeight = DEFAULT_VIEW_HEIGHT
 
     scene.fog = new THREE.Fog(SKY_COLOR, CAMERA_BACKOFF + gridSpan * 0.3, CAMERA_BACKOFF + gridSpan * 1.2)
 
@@ -392,12 +402,6 @@ export function AgentScene({
 
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault()
-      viewHeight = THREE.MathUtils.clamp(
-        viewHeight + event.deltaY * 0.03,
-        MIN_VIEW_HEIGHT,
-        MAX_VIEW_HEIGHT,
-      )
-      updateCameraFrame()
     }
     mount.addEventListener('wheel', handleWheel, { passive: false })
     mount.style.cursor = 'grab'
@@ -645,6 +649,20 @@ export function AgentScene({
             : currentYaw + remaining * Math.min(1, delta * TURN_SPEED)
         applyYaw(currentYaw)
         updateCameraPosition()
+      }
+
+      const targetViewHeight = THREE.MathUtils.clamp(
+        DEFAULT_VIEW_HEIGHT / ZOOM_STEP ** zoomLevelRef.current,
+        MIN_VIEW_HEIGHT,
+        MAX_VIEW_HEIGHT,
+      )
+      if (viewHeight !== targetViewHeight) {
+        const remaining = targetViewHeight - viewHeight
+        viewHeight =
+          Math.abs(remaining) < 0.01
+            ? targetViewHeight
+            : viewHeight + remaining * Math.min(1, delta * ZOOM_SPEED)
+        updateCameraFrame()
       }
       WATER_TIME.value = clock.elapsedTime
       for (const mesh of meshesRef.current.values()) {
