@@ -4,6 +4,7 @@ import { AgentPosition } from '../hooks/parseAgentsMessage'
 import { TownEntity } from '../hooks/parseTownMessage'
 import { Villager } from '../hooks/mergeVillagerData'
 import { RouteTile } from '../hooks/parseRoutesMessage'
+import { viewYaw } from '../hooks/viewRotation'
 
 // Flat kinds get a tiny lift each so overlapping floors don't flicker; the dock sits above the sea.
 const KIND_STYLES: Record<string, { color: number; height: number; lift: number }> = {
@@ -172,7 +173,7 @@ void main() {
   #include <colorspace_fragment>
 }`
 
-const ISO_YAW = Math.PI / 4
+const TURN_SPEED = 8
 // About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
 const ISO_PITCH = Math.PI / 6
 
@@ -201,6 +202,7 @@ interface AgentSceneProps {
   talkingVillager: Villager | null
   routes: Map<string, RouteTile[]>
   showRoutes: boolean
+  viewTurns: number
 }
 
 export function AgentScene({
@@ -214,6 +216,7 @@ export function AgentScene({
   talkingVillager,
   routes,
   showRoutes,
+  viewTurns,
 }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -231,6 +234,11 @@ export function AgentScene({
   const bubbleRef = useRef<HTMLDivElement>(null)
   const nearbyVillagerRef = useRef<Villager | null>(null)
   const talkingVillagerRef = useRef<Villager | null>(null)
+  const targetYawRef = useRef(viewYaw(0))
+
+  useEffect(() => {
+    targetYawRef.current = viewYaw(viewTurns)
+  }, [viewTurns])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -248,11 +256,6 @@ export function AgentScene({
     const gridSpan = Math.max(gridWidth, gridHeight)
     const gridMinSpan = Math.min(gridWidth, gridHeight)
     const cameraTarget = new THREE.Vector3(gridWidth / 2, 0, gridHeight / 2)
-    const cameraDirection = new THREE.Vector3(
-      Math.sin(ISO_YAW) * Math.cos(ISO_PITCH),
-      Math.sin(ISO_PITCH),
-      Math.cos(ISO_YAW) * Math.cos(ISO_PITCH),
-    )
     // With no perspective, distance only has to keep the whole board in front of the camera.
     const CAMERA_BACKOFF = gridSpan * 2
     const MIN_VIEW_HEIGHT = gridMinSpan * 0.1
@@ -273,12 +276,29 @@ export function AgentScene({
       height: Math.floor(mount.clientHeight / PIXEL_SIZE),
     })
 
-    // The camera never turns, so its screen directions are fixed once.
-    camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
-    camera.lookAt(cameraTarget)
-    camera.updateMatrixWorld()
-    const screenRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0)
-    const screenUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1)
+    let currentYaw = targetYawRef.current
+    const cameraDirection = new THREE.Vector3()
+    const screenRight = new THREE.Vector3()
+    const screenUp = new THREE.Vector3()
+    const groundForward = new THREE.Vector3()
+    const groundRight = new THREE.Vector3()
+    const worldUp = new THREE.Vector3(0, 1, 0)
+
+    const applyYaw = (yaw: number) => {
+      cameraDirection.set(
+        Math.sin(yaw) * Math.cos(ISO_PITCH),
+        Math.sin(ISO_PITCH),
+        Math.cos(yaw) * Math.cos(ISO_PITCH),
+      )
+      camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
+      camera.lookAt(cameraTarget)
+      camera.updateMatrixWorld()
+      screenRight.setFromMatrixColumn(camera.matrixWorld, 0)
+      screenUp.setFromMatrixColumn(camera.matrixWorld, 1)
+      groundForward.set(-cameraDirection.x, 0, -cameraDirection.z).normalize()
+      groundRight.copy(groundForward).cross(worldUp).normalize()
+    }
+    applyYaw(currentYaw)
 
     const updateCameraPosition = () => {
       camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
@@ -326,14 +346,6 @@ export function AgentScene({
     }
     mount.addEventListener('wheel', handleWheel, { passive: false })
     mount.style.cursor = 'grab'
-
-    // Drag (mouse or touch) slides the camera across the ground at the same fixed angle.
-    const groundForward = new THREE.Vector3(
-      cameraTarget.x - camera.position.x,
-      0,
-      cameraTarget.z - camera.position.z,
-    ).normalize()
-    const groundRight = groundForward.clone().cross(new THREE.Vector3(0, 1, 0)).normalize()
 
     let isDragging = false
     let lastPointerX = 0
@@ -507,6 +519,16 @@ export function AgentScene({
     let frameId: number
     const animate = () => {
       const delta = clock.getDelta()
+      if (currentYaw !== targetYawRef.current) {
+        const remaining = targetYawRef.current - currentYaw
+        // Land exactly on the target so pixel snapping returns to a fixed grid after the turn.
+        currentYaw =
+          Math.abs(remaining) < 0.001
+            ? targetYawRef.current
+            : currentYaw + remaining * Math.min(1, delta * TURN_SPEED)
+        applyYaw(currentYaw)
+        updateCameraPosition()
+      }
       WATER_TIME.value = clock.elapsedTime
       for (const mesh of meshesRef.current.values()) {
         glide(mesh, delta, clock.elapsedTime)

@@ -6,13 +6,16 @@ import { useTalkTrigger } from './hooks/useTalkTrigger'
 import { findNearbyVillager } from './hooks/findNearbyVillager'
 import { AgentScene } from './scene/AgentScene'
 import { DevPanel } from './DevPanel'
+import { useViewRotation } from './hooks/useViewRotation'
+import { gridDirectionForKey } from './hooks/viewRotation'
 
 const TALK_DISMISS_MS = 4000
 
 function App() {
   const { agents, player, town, routes, gridSize, talkRangeTiles, sendMove, sendGoTo } =
     useGameConnection('ws://localhost:8420/ws')
-  useKeyboardMovement(sendMove)
+  const viewTurns = useViewRotation()
+  useKeyboardMovement((key) => sendMove(gridDirectionForKey(key, viewTurns)))
   const devMode = useDevModeToggle()
 
   const [talkingVillagerId, setTalkingVillagerId] = useState<string | null>(null)
@@ -58,6 +61,7 @@ function App() {
         talkingVillager={talkingVillager}
         routes={routes}
         showRoutes={devMode}
+        viewTurns={viewTurns}
       />
       {devMode && (
         <DevPanel villagers={agents} places={places} routes={routes} onGoTo={sendGoTo} />
