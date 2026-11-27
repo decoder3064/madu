@@ -171,8 +171,47 @@ void main() {
     color.rgb *= ${CREASE_DARKEN.toFixed(2)};
   }
   gl_FragColor = color;
+}`
+
+// Half the height of the sharp band, as a fraction of the screen.
+const FOCUS_HALF_HEIGHT = 0.18
+const MAX_BLUR_PIXELS = 3.0
+const SATURATION = 1.1
+const VIGNETTE_STRENGTH = 0.25
+
+const TILT_SHIFT_FRAGMENT = `
+uniform sampler2D tScene;
+uniform vec2 texel;
+varying vec2 vUv;
+
+vec3 sampleAt(vec2 offset) {
+  return texture2D(tScene, vUv + offset * texel).rgb;
+}
+
+void main() {
+  float distanceFromFocus = abs(vUv.y - 0.5);
+  float blur = smoothstep(${FOCUS_HALF_HEIGHT.toFixed(2)}, 0.5, distanceFromFocus) * ${MAX_BLUR_PIXELS.toFixed(1)};
+  vec3 color = sampleAt(vec2(0.0));
+  if (blur > 0.5) {
+    vec3 sum = color;
+    float count = 1.0;
+    // Two rings of 8 samples; each lands on a whole art pixel, so the blur stays pixelated.
+    for (int i = 0; i < 8; i++) {
+      float angle = float(i) * 0.785398;
+      vec2 direction = vec2(cos(angle), sin(angle));
+      sum += sampleAt(direction * blur);
+      sum += sampleAt(direction * blur * 0.5);
+      count += 2.0;
+    }
+    color = sum / count;
+  }
+  float gray = dot(color, vec3(0.299, 0.587, 0.114));
+  color = mix(vec3(gray), color, ${SATURATION.toFixed(2)});
+  float vignette = 1.0 - ${VIGNETTE_STRENGTH.toFixed(2)} * smoothstep(0.3, 0.75, length(vUv - 0.5));
+  gl_FragColor = vec4(color * vignette, 1.0);
   #include <colorspace_fragment>
 }`
+
 
 const TURN_SPEED = 8
 // About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
@@ -492,6 +531,21 @@ export function AgentScene({
     outlineScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), outlineMaterial))
     const outlineCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
+    const outlinedTarget = new THREE.WebGLRenderTarget(1, 1, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    })
+    const tiltShiftMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tScene: { value: outlinedTarget.texture },
+        texel: { value: new THREE.Vector2() },
+      },
+      vertexShader: OUTLINE_VERTEX,
+      fragmentShader: TILT_SHIFT_FRAGMENT,
+    })
+    const tiltShiftScene = new THREE.Scene()
+    tiltShiftScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), tiltShiftMaterial))
+
     const handleResize = () => {
       const { width, height } = artSize()
       updateCameraFrame()
@@ -500,6 +554,8 @@ export function AgentScene({
       colorTarget.setSize(width, height)
       normalTarget.setSize(width, height)
       outlineMaterial.uniforms.texel.value.set(1 / width, 1 / height)
+      outlinedTarget.setSize(width, height)
+      tiltShiftMaterial.uniforms.texel.value.set(1 / width, 1 / height)
     }
     handleResize()
     window.addEventListener('resize', handleResize)
@@ -617,8 +673,10 @@ export function AgentScene({
       renderer.setRenderTarget(normalTarget)
       renderer.render(scene, camera)
       scene.overrideMaterial = null
-      renderer.setRenderTarget(null)
+      renderer.setRenderTarget(outlinedTarget)
       renderer.render(outlineScene, outlineCamera)
+      renderer.setRenderTarget(null)
+      renderer.render(tiltShiftScene, outlineCamera)
       overlayRenderer.render(overlayScene, camera)
 
       const promptEl = promptRef.current
@@ -677,6 +735,8 @@ export function AgentScene({
       normalTarget.dispose()
       normalMaterial.dispose()
       outlineMaterial.dispose()
+      outlinedTarget.dispose()
+      tiltShiftMaterial.dispose()
       overlaySceneRef.current = null
       meshesRef.current.clear()
       playerMeshRef.current = null
