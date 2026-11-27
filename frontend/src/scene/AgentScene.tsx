@@ -50,24 +50,21 @@ const WATER_TIME = { value: 0 }
 
 // Extends the standard lit material so the sea keeps sunlight, shadows, and fog.
 // Ripples only tilt the surface for lighting; real height changes would poke through the dock and grid.
+// Ripples come from world position so neighbouring water pieces join without seams.
 function makeWaterMaterial(color: number): THREE.MeshStandardMaterial {
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.1 })
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.1 })
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = WATER_TIME
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uTime;
 varying vec2 vWaterPos;`,
       )
       .replace(
-        '#include <beginnormal_vertex>',
-        `vWaterPos = position.xy;
-float diagonal = 0.15 * cos((position.x + position.y) * 0.9 + uTime * 1.7);
-float slopeX = 0.25 * cos(position.x * 0.6 + uTime * 1.1) + diagonal;
-float slopeY = 0.25 * cos(position.y * 0.45 + uTime * 0.8) + diagonal;
-vec3 objectNormal = normalize(vec3(-slopeX, -slopeY, 1.0));`,
+        '#include <project_vertex>',
+        `#include <project_vertex>
+vWaterPos = (modelMatrix * vec4(transformed, 1.0)).xz;`,
       )
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -77,10 +74,21 @@ uniform float uTime;
 varying vec2 vWaterPos;`,
       )
       .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+float swell = 0.12 * cos(vWaterPos.x * 0.23 - vWaterPos.y * 0.31 + uTime * 0.5);
+float diagonal = 0.15 * cos((vWaterPos.x + vWaterPos.y) * 0.9 + uTime * 1.7);
+float slopeX = 0.25 * cos(vWaterPos.x * 0.6 + uTime * 1.1) + diagonal + swell;
+float slopeZ = 0.25 * cos(vWaterPos.y * 0.45 + uTime * 0.8) + diagonal - swell;
+// Water is always flat, so the tilted surface direction can be built straight in world space.
+normal = normalize((viewMatrix * vec4(normalize(vec3(-slopeX, 1.0, -slopeZ)), 0.0)).xyz);`,
+      )
+      .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-float shimmer = sin(vWaterPos.x * 1.3 + uTime * 1.5) * sin(vWaterPos.y * 1.1 - uTime * 1.2);
-diffuseColor.rgb += shimmer * 0.05;`,
+float shimmer = 0.6 * sin(vWaterPos.x * 1.3 + vWaterPos.y * 0.4 + uTime * 1.5)
+  + 0.4 * sin(vWaterPos.y * 1.1 - vWaterPos.x * 0.7 - uTime * 1.2);
+diffuseColor.rgb += shimmer * 0.04;`,
       )
       .replace(
         '#include <opaque_fragment>',
@@ -299,6 +307,7 @@ export function AgentScene({
   }, [onFollowChange])
   const routeLinesRef = useRef<THREE.Line[]>([])
   const gridLinesRef = useRef<THREE.LineSegments | null>(null)
+  const borderRef = useRef<THREE.Line | null>(null)
   const promptRef = useRef<HTMLDivElement>(null)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const nearbyVillagerRef = useRef<Villager | null>(null)
@@ -603,7 +612,9 @@ export function AgentScene({
       borderGeometry,
       new THREE.LineBasicMaterial({ color: 0xffffff }),
     )
+    border.visible = showGridLines
     overlayScene.add(border)
+    borderRef.current = border
 
     const skyLight = new THREE.HemisphereLight(0xcfe8ff, 0x5a7d4a, 1.2)
     scene.add(skyLight)
@@ -625,6 +636,23 @@ export function AgentScene({
     sun.shadow.normalBias = 0.02
     scene.add(sun)
     scene.add(sun.target)
+
+    // Open sea in every direction; the fog fades it into the sky before its far edge shows.
+    const oceanReach = gridSpan * 3
+    const oceanMaterial = makeWaterMaterial(KIND_STYLES.water.color)
+    const oceanStrips = [
+      { x: -oceanReach, z: -oceanReach, width: gridWidth + oceanReach * 2, depth: oceanReach },
+      { x: -oceanReach, z: gridHeight, width: gridWidth + oceanReach * 2, depth: oceanReach },
+      { x: -oceanReach, z: 0, width: oceanReach, depth: gridHeight },
+      { x: gridWidth, z: 0, width: oceanReach, depth: gridHeight },
+    ]
+    for (const strip of oceanStrips) {
+      const ocean = new THREE.Mesh(new THREE.PlaneGeometry(strip.width, strip.depth), oceanMaterial)
+      ocean.rotation.x = -Math.PI / 2
+      ocean.position.set(strip.x + strip.width / 2, SEA_LEVEL, strip.z + strip.depth / 2)
+      ocean.receiveShadow = true
+      scene.add(ocean)
+    }
 
     const clock = new THREE.Clock()
     const screenSpotOf = (villager: Villager) => {
@@ -790,6 +818,9 @@ export function AgentScene({
     if (gridLinesRef.current) {
       gridLinesRef.current.visible = showGridLines
     }
+    if (borderRef.current) {
+      borderRef.current.visible = showGridLines
+    }
   }, [showGridLines])
 
   useEffect(() => {
@@ -879,6 +910,17 @@ export function AgentScene({
         scene.add(block)
         townMeshesRef.current.set(`land-${index}`, block)
       }
+
+      // The dock is a pier, so it needs sea underneath or you see the sky through the gap.
+      const waterUnderDocks = makeWaterMaterial(KIND_STYLES.water.color)
+      for (const dock of town.filter((entity) => entity.kind === 'dock')) {
+        const water = new THREE.Mesh(new THREE.PlaneGeometry(dock.width, dock.height), waterUnderDocks)
+        water.rotation.x = -Math.PI / 2
+        water.position.set(dock.x + dock.width / 2, SEA_LEVEL, dock.y + dock.height / 2)
+        water.receiveShadow = true
+        scene.add(water)
+        townMeshesRef.current.set(`water-under-${dock.id}`, water)
+      }
     }
 
     for (const entity of town) {
@@ -898,12 +940,7 @@ export function AgentScene({
         mesh.position.set(centerX, (style.height - ISLAND_DEPTH) / 2, centerZ)
         mesh.castShadow = true
       } else {
-        const segmentsAcross = isWater ? entity.width : 1
-        const segmentsDown = isWater ? entity.height : 1
-        mesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(entity.width, entity.height, segmentsAcross, segmentsDown),
-          material,
-        )
+        mesh = new THREE.Mesh(new THREE.PlaneGeometry(entity.width, entity.height), material)
         mesh.rotation.x = -Math.PI / 2
         mesh.position.set(centerX, style.lift, centerZ)
       }
