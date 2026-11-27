@@ -6,11 +6,16 @@ import { Villager } from '../hooks/mergeVillagerData'
 import { RouteTile } from '../hooks/parseRoutesMessage'
 import { viewYaw } from '../hooks/viewRotation'
 import { PLAYER_TARGET } from '../CameraPicker'
+import { landRectangles } from './landRectangles'
+
+const SEA_LEVEL = -0.4
+const ISLAND_DEPTH = 3
+const DIRT_COLOR = 0x7a5a3c
 
 // Flat kinds get a tiny lift each so overlapping floors don't flicker; the dock sits above the sea.
 const KIND_STYLES: Record<string, { color: number; height: number; lift: number }> = {
   zone: { color: 0xd9c38c, height: 0, lift: 0.01 },
-  water: { color: 0x2b6cb0, height: 0, lift: 0.02 },
+  water: { color: 0x2b6cb0, height: 0, lift: SEA_LEVEL },
   dock: { color: 0x8b5a2b, height: 0, lift: 0.03 },
   forest: { color: 0x1f4d2b, height: 1.5, lift: 0 },
   building: { color: 0x8a8a8a, height: 2, lift: 0 },
@@ -564,15 +569,6 @@ export function AgentScene({
     handleResize()
     window.addEventListener('resize', handleResize)
 
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(gridWidth, gridHeight),
-      toonMaterial(GRASS_COLOR),
-    )
-    ground.receiveShadow = true
-    ground.rotation.x = -Math.PI / 2
-    ground.position.set(gridWidth / 2, 0, gridHeight / 2)
-    scene.add(ground)
-
     // Built manually (rather than THREE.GridHelper, which only draws a
     // square) so the lines exactly match a non-square board's real shape.
     const gridLinePoints: number[] = []
@@ -864,6 +860,27 @@ export function AgentScene({
     const labelLayer = labelLayerRef.current
     if (!labelLayer) return
 
+    if (town.length > 0 && !townMeshesRef.current.has('land-0')) {
+      // The dock sits over water, so it leaves a gap in the land like the sea does.
+      const seaAreas = town.filter((entity) => entity.kind === 'water' || entity.kind === 'dock')
+      const grass = toonMaterial(GRASS_COLOR)
+      const dirt = toonMaterial(DIRT_COLOR)
+      // Box faces in order: east, west, top, bottom, south, north. Only the top is grass.
+      const landFaces = [dirt, dirt, grass, dirt, dirt, dirt]
+      const land = landRectangles(gridWidth, gridHeight, seaAreas)
+      for (let index = 0; index < land.length; index++) {
+        const rect = land[index]
+        const block = new THREE.Mesh(
+          new THREE.BoxGeometry(rect.width, ISLAND_DEPTH, rect.height),
+          landFaces,
+        )
+        block.position.set(rect.x + rect.width / 2, -ISLAND_DEPTH / 2, rect.y + rect.height / 2)
+        block.receiveShadow = true
+        scene.add(block)
+        townMeshesRef.current.set(`land-${index}`, block)
+      }
+    }
+
     for (const entity of town) {
       if (townMeshesRef.current.has(entity.id)) continue
       const style = KIND_STYLES[entity.kind] ?? UNKNOWN_KIND_STYLE
@@ -875,10 +892,10 @@ export function AgentScene({
       let mesh: THREE.Mesh
       if (style.height > 0) {
         mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(entity.width, style.height, entity.height),
+          new THREE.BoxGeometry(entity.width, style.height + ISLAND_DEPTH, entity.height),
           material,
         )
-        mesh.position.set(centerX, style.height / 2, centerZ)
+        mesh.position.set(centerX, (style.height - ISLAND_DEPTH) / 2, centerZ)
         mesh.castShadow = true
       } else {
         const segmentsAcross = isWater ? entity.width : 1
