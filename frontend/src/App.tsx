@@ -75,6 +75,7 @@ function App() {
         followTarget={followTarget}
         onFollowChange={setFollowTarget}
         zoomLevel={zoomLevel}
+        showPerformance={devMode}
       />
       <CameraPicker villagers={agents} followTarget={followTarget} onChange={setFollowTarget} />
       <ZoomControls level={zoomLevel} onZoomIn={zoomIn} onZoomOut={zoomOut} />

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import * as THREE from 'three'
 import { AgentPosition } from '../hooks/parseAgentsMessage'
 import { TownEntity } from '../hooks/parseTownMessage'
@@ -238,6 +239,22 @@ const FOLLOW_SMOOTHING = 4
 const DRAG_THRESHOLD_PX = 4
 const PICK_RADIUS_PX = 24
 
+const PERF_REPORT_MS = 500
+
+const PERF_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: 12,
+  left: 12,
+  padding: '4px 8px',
+  background: 'rgba(0, 0, 0, 0.75)',
+  color: '#7CFC00',
+  fontFamily: 'monospace',
+  fontSize: 12,
+  borderRadius: 6,
+  pointerEvents: 'none',
+  display: 'none',
+}
+
 const LABEL_STYLE: Partial<CSSStyleDeclaration> = {
   position: 'absolute',
   transform: 'translate(-50%, -50%)',
@@ -264,6 +281,7 @@ interface AgentSceneProps {
   followTarget: string | null
   onFollowChange: (target: string | null) => void
   zoomLevel: number
+  showPerformance: boolean
 }
 
 export function AgentScene({
@@ -281,6 +299,7 @@ export function AgentScene({
   followTarget,
   onFollowChange,
   zoomLevel,
+  showPerformance,
 }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -293,6 +312,13 @@ export function AgentScene({
   const followTargetRef = useRef(followTarget)
   const onFollowChangeRef = useRef(onFollowChange)
   const zoomLevelRef = useRef(zoomLevel)
+  const perfRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (perfRef.current) {
+      perfRef.current.style.display = showPerformance ? 'block' : 'none'
+    }
+  }, [showPerformance])
 
   useEffect(() => {
     zoomLevelRef.current = zoomLevel
@@ -510,6 +536,10 @@ export function AgentScene({
     renderer.domElement.style.imageRendering = 'pixelated'
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.BasicShadowMap
+    // Each frame renders several passes; count them all instead of only the last one.
+    renderer.info.autoReset = false
+    let framesSinceReport = 0
+    let lastReport = performance.now()
     mount.appendChild(renderer.domElement)
 
     // Dev overlays draw on their own full-resolution canvas so they stay thin and crisp over the pixel art.
@@ -663,6 +693,7 @@ export function AgentScene({
 
     let frameId: number
     const animate = () => {
+      renderer.info.reset()
       const delta = clock.getDelta()
       if (currentYaw !== targetYawRef.current) {
         const remaining = targetYawRef.current - currentYaw
@@ -720,6 +751,18 @@ export function AgentScene({
       renderer.setRenderTarget(null)
       renderer.render(tiltShiftScene, outlineCamera)
       overlayRenderer.render(overlayScene, camera)
+
+      framesSinceReport += 1
+      const now = performance.now()
+      const perfEl = perfRef.current
+      if (perfEl && now - lastReport >= PERF_REPORT_MS) {
+        const fps = (framesSinceReport * 1000) / (now - lastReport)
+        const drawCalls = renderer.info.render.calls + overlayRenderer.info.render.calls
+        const triangles = renderer.info.render.triangles + overlayRenderer.info.render.triangles
+        perfEl.textContent = `${fps.toFixed(0)} fps, ${drawCalls} draw calls, ${triangles} triangles`
+        framesSinceReport = 0
+        lastReport = now
+      }
 
       const promptEl = promptRef.current
       const nearby = nearbyVillagerRef.current
@@ -966,6 +1009,7 @@ export function AgentScene({
         ref={labelLayerRef}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       />
+      <div ref={perfRef} style={PERF_STYLE} />
       <div
         ref={promptRef}
         style={{
