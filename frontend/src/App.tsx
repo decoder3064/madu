@@ -8,6 +8,8 @@ import { AgentScene } from './scene/AgentScene'
 import { DevPanel } from './DevPanel'
 import { useViewRotation } from './hooks/useViewRotation'
 import { gridDirectionForKey } from './hooks/viewRotation'
+import { CameraPicker, PLAYER_TARGET } from './CameraPicker'
+import { useFollowMeKey } from './hooks/useFollowMeKey'
 
 const TALK_DISMISS_MS = 4000
 
@@ -15,6 +17,8 @@ function App() {
   const { agents, player, town, routes, gridSize, talkRangeTiles, sendMove, sendGoTo } =
     useGameConnection('ws://localhost:8420/ws')
   const viewTurns = useViewRotation()
+  const [followTarget, setFollowTarget] = useState<string | null>(PLAYER_TARGET)
+  useFollowMeKey(() => setFollowTarget(PLAYER_TARGET))
   useKeyboardMovement((key) => sendMove(gridDirectionForKey(key, viewTurns)))
   const devMode = useDevModeToggle()
 
@@ -62,7 +66,10 @@ function App() {
         routes={routes}
         showRoutes={devMode}
         viewTurns={viewTurns}
+        followTarget={followTarget}
+        onFollowChange={setFollowTarget}
       />
+      <CameraPicker villagers={agents} followTarget={followTarget} onChange={setFollowTarget} />
       {devMode && (
         <DevPanel villagers={agents} places={places} routes={routes} onGoTo={sendGoTo} />
       )}

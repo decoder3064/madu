@@ -5,6 +5,7 @@ import { TownEntity } from '../hooks/parseTownMessage'
 import { Villager } from '../hooks/mergeVillagerData'
 import { RouteTile } from '../hooks/parseRoutesMessage'
 import { viewYaw } from '../hooks/viewRotation'
+import { PLAYER_TARGET } from '../CameraPicker'
 
 // Flat kinds get a tiny lift each so overlapping floors don't flicker; the dock sits above the sea.
 const KIND_STYLES: Record<string, { color: number; height: number; lift: number }> = {
@@ -177,8 +178,11 @@ const TURN_SPEED = 8
 // About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
 const ISO_PITCH = Math.PI / 6
 
-const FOLLOW_EDGE_FRACTION = 0.2
-const FOLLOW_SPEED = 0.1
+// How quickly the camera catches up to who it follows; higher is snappier.
+const FOLLOW_SMOOTHING = 4
+// A press counts as a drag only after moving this far, so clicks stay clicks.
+const DRAG_THRESHOLD_PX = 4
+const PICK_RADIUS_PX = 24
 
 const LABEL_STYLE: Partial<CSSStyleDeclaration> = {
   position: 'absolute',
@@ -203,6 +207,8 @@ interface AgentSceneProps {
   routes: Map<string, RouteTile[]>
   showRoutes: boolean
   viewTurns: number
+  followTarget: string | null
+  onFollowChange: (target: string | null) => void
 }
 
 export function AgentScene({
@@ -217,6 +223,8 @@ export function AgentScene({
   routes,
   showRoutes,
   viewTurns,
+  followTarget,
+  onFollowChange,
 }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -226,8 +234,16 @@ export function AgentScene({
   const townMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const townLabelsRef = useRef<{ entity: TownEntity; element: HTMLDivElement }[]>([])
   const labelLayerRef = useRef<HTMLDivElement>(null)
-  const playerPositionRef = useRef<AgentPosition | null>(null)
-  const followRequestedRef = useRef(false)
+  const followTargetRef = useRef(followTarget)
+  const onFollowChangeRef = useRef(onFollowChange)
+
+  useEffect(() => {
+    followTargetRef.current = followTarget
+  }, [followTarget])
+
+  useEffect(() => {
+    onFollowChangeRef.current = onFollowChange
+  }, [onFollowChange])
   const routeLinesRef = useRef<THREE.Line[]>([])
   const gridLinesRef = useRef<THREE.LineSegments | null>(null)
   const promptRef = useRef<HTMLDivElement>(null)
@@ -347,21 +363,64 @@ export function AgentScene({
     mount.addEventListener('wheel', handleWheel, { passive: false })
     mount.style.cursor = 'grab'
 
+    const screenPositionOf = (position: THREE.Vector3) => {
+      const vector = position.clone().project(camera)
+      return {
+        left: ((vector.x + 1) / 2) * mount.clientWidth,
+        top: ((1 - vector.y) / 2) * mount.clientHeight,
+      }
+    }
+
+    const followedMesh = () => {
+      const target = followTargetRef.current
+      if (target === null) return null
+      if (target === PLAYER_TARGET) return playerMeshRef.current
+      return meshesRef.current.get(target) ?? null
+    }
+
+    const pickAt = (event: PointerEvent) => {
+      const rect = mount.getBoundingClientRect()
+      const x = event.clientX - rect.left
+      const y = event.clientY - rect.top
+      const candidates: [string, THREE.Mesh][] = Array.from(meshesRef.current.entries())
+      if (playerMeshRef.current) candidates.push([PLAYER_TARGET, playerMeshRef.current])
+
+      let picked: string | null = null
+      let closest = PICK_RADIUS_PX
+      for (const [id, mesh] of candidates) {
+        const spot = screenPositionOf(mesh.position)
+        const distance = Math.hypot(spot.left - x, spot.top - y)
+        if (distance < closest) {
+          picked = id
+          closest = distance
+        }
+      }
+      if (picked !== null) onFollowChangeRef.current(picked)
+    }
+
     let isDragging = false
+    let pointerIsDown = false
+    let downX = 0
+    let downY = 0
     let lastPointerX = 0
     let lastPointerY = 0
 
     const handlePointerDown = (event: PointerEvent) => {
-      isDragging = true
-      followRequestedRef.current = false
-      lastPointerX = event.clientX
-      lastPointerY = event.clientY
+      pointerIsDown = true
+      isDragging = false
+      downX = lastPointerX = event.clientX
+      downY = lastPointerY = event.clientY
       mount.setPointerCapture(event.pointerId)
       mount.style.cursor = 'grabbing'
     }
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (!isDragging) return
+      if (!pointerIsDown) return
+      if (!isDragging) {
+        if (Math.hypot(event.clientX - downX, event.clientY - downY) < DRAG_THRESHOLD_PX) return
+        isDragging = true
+        onFollowChangeRef.current(null)
+      }
       const deltaX = event.clientX - lastPointerX
       const deltaY = event.clientY - lastPointerY
       lastPointerX = event.clientX
@@ -377,6 +436,8 @@ export function AgentScene({
     }
 
     const handlePointerUp = (event: PointerEvent) => {
+      if (pointerIsDown && !isDragging) pickAt(event)
+      pointerIsDown = false
       isDragging = false
       mount.releasePointerCapture(event.pointerId)
       mount.style.cursor = 'grab'
@@ -537,23 +598,12 @@ export function AgentScene({
         glide(playerMeshRef.current, delta, clock.elapsedTime)
       }
 
-      const followed = playerPositionRef.current
-      if (followed && followRequestedRef.current && !isDragging) {
-        const { left, top } = projectToScreen(followed.x, followed.y)
-        const edgeX = mount.clientWidth * FOLLOW_EDGE_FRACTION
-        const edgeY = mount.clientHeight * FOLLOW_EDGE_FRACTION
-        const nearEdge =
-          left < edgeX ||
-          left > mount.clientWidth - edgeX ||
-          top < edgeY ||
-          top > mount.clientHeight - edgeY
-        if (nearEdge) {
-          cameraTarget.x += (followed.x + 0.5 - cameraTarget.x) * FOLLOW_SPEED
-          cameraTarget.z += (followed.y + 0.5 - cameraTarget.z) * FOLLOW_SPEED
-          updateCameraPosition()
-        } else {
-          followRequestedRef.current = false
-        }
+      const followed = followedMesh()
+      if (followed && !isDragging) {
+        const ease = 1 - Math.exp(-delta * FOLLOW_SMOOTHING)
+        cameraTarget.x += (followed.position.x - cameraTarget.x) * ease
+        cameraTarget.z += (followed.position.z - cameraTarget.z) * ease
+        updateCameraPosition()
       }
 
       const worldPerPixel = viewHeight / artSize().height
@@ -705,13 +755,6 @@ export function AgentScene({
   }, [agents])
 
   useEffect(() => {
-    const previous = playerPositionRef.current
-    // The server re-sends the player every tick, so only an actual step counts.
-    if (player && (!previous || previous.x !== player.x || previous.y !== player.y)) {
-      followRequestedRef.current = true
-    }
-    playerPositionRef.current = player
-
     const scene = sceneRef.current
     if (!scene) return
 
