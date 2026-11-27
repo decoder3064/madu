@@ -47,6 +47,10 @@ function toonMaterial(color: number): THREE.MeshToonMaterial {
 }
 
 const WATER_BANDS = 5.0
+// Sparkles appear only where the waves are higher than this, on a 0 to 1 scale.
+const SPARKLE_CREST = 0.78
+// Share of each twinkle cycle a crest cell spends lit.
+const SPARKLE_DENSITY = 0.3
 const WATER_TIME = { value: 0 }
 
 // Extends the standard lit material so the sea keeps sunlight, shadows, and fog.
@@ -77,12 +81,18 @@ varying vec2 vWaterPos;`,
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
-float swell = 0.12 * cos(vWaterPos.x * 0.23 - vWaterPos.y * 0.31 + uTime * 0.5);
-float diagonal = 0.15 * cos((vWaterPos.x + vWaterPos.y) * 0.9 + uTime * 1.7);
-float slopeX = 0.25 * cos(vWaterPos.x * 0.6 + uTime * 1.1) + diagonal + swell;
-float slopeZ = 0.25 * cos(vWaterPos.y * 0.45 + uTime * 0.8) + diagonal - swell;
+float phase1 = dot(vWaterPos, vec2(0.94, 0.34)) * 0.37 + uTime * 0.9;
+float phase2 = dot(vWaterPos, vec2(0.26, 0.97)) * 0.53 - uTime * 1.3;
+float phase3 = dot(vWaterPos, vec2(-0.64, 0.77)) * 0.71 + uTime * 1.7;
+float phase4 = dot(vWaterPos, vec2(-0.98, 0.17)) * 1.13 - uTime * 0.6;
+// Four waves in uneven directions and sizes; two straight crossing waves would tile into a grid of blobs.
+vec2 slope = 0.30 * cos(phase1) * vec2(0.94, 0.34)
+  + 0.25 * cos(phase2) * vec2(0.26, 0.97)
+  + 0.20 * cos(phase3) * vec2(-0.64, 0.77)
+  + 0.15 * cos(phase4) * vec2(-0.98, 0.17);
+float crest = (0.30 * sin(phase1) + 0.25 * sin(phase2) + 0.20 * sin(phase3) + 0.15 * sin(phase4)) / 0.9 * 0.5 + 0.5;
 // Water is always flat, so the tilted surface direction can be built straight in world space.
-normal = normalize((viewMatrix * vec4(normalize(vec3(-slopeX, 1.0, -slopeZ)), 0.0)).xyz);`,
+normal = normalize((viewMatrix * vec4(normalize(vec3(-slope.x, 1.0, -slope.y)), 0.0)).xyz);`,
       )
       .replace(
         '#include <color_fragment>',
@@ -96,6 +106,11 @@ diffuseColor.rgb += shimmer * 0.04;`,
         `float brightness = dot(outgoingLight, vec3(0.299, 0.587, 0.114));
 float steppedBrightness = ceil(brightness * ${WATER_BANDS.toFixed(1)}) / ${WATER_BANDS.toFixed(1)};
 outgoingLight *= steppedBrightness / max(brightness, 0.001);
+// Sparkles sit on the highest crests and twinkle; unlike sun glints they look the same from every side.
+float twinkle = fract(sin(dot(floor(vWaterPos * 2.0), vec2(12.9898, 78.233))) * 43758.5453);
+float sparkle = step(${SPARKLE_CREST.toFixed(2)}, crest)
+  * step(${(1 - SPARKLE_DENSITY).toFixed(2)}, fract(twinkle + uTime * 0.7));
+outgoingLight = mix(outgoingLight, vec3(1.0), sparkle * clamp(brightness * 1.5, 0.0, 1.0));
 #include <opaque_fragment>`,
       )
   }
