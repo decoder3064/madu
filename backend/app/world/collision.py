@@ -1,7 +1,7 @@
-from app.world.building import Building
+from app.world.town import TownEntity
 
 
-def is_blocked(x: int, y: int, buildings: list[Building]) -> bool:
+def is_blocked(x: int, y: int, buildings: list[TownEntity]) -> bool:
     for building in buildings:
         if (
             building.x <= x < building.x + building.width

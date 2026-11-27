@@ -2,7 +2,7 @@ from app.core.config import WALK_DURATION_SECONDS_MIN, REST_DURATION_SECONDS_MAX
 from app.world.grid import Grid
 from app.world.agent import Agent
 from app.world.player import Player
-from app.world.building import Building
+from tests.helpers import blocker
 from app.persistence.store import Store
 from app.world.simulation import Simulation, _ticks
 
@@ -70,7 +70,7 @@ def test_agent_turns_away_from_building_when_hitboxes_enabled(monkeypatch):
     grid = Grid(width=20, height=20)
     agent = Agent(agent_id="a1", x=10, y=10)
     player = Player(player_id="p1", x=0, y=0)
-    building = Building(building_id="b1", x=9, y=0, size=10)
+    building = blocker("b1", x=9, y=0, size=10)
     store = Store(grid, [agent], player, [building])
     sim = Simulation(store, hitboxes_enabled=True)
 
@@ -84,7 +84,7 @@ def test_agent_ignores_building_when_hitboxes_disabled(monkeypatch):
     grid = Grid(width=20, height=20)
     agent = Agent(agent_id="a1", x=10, y=10)
     player = Player(player_id="p1", x=0, y=0)
-    building = Building(building_id="b1", x=9, y=0, size=10)
+    building = blocker("b1", x=9, y=0, size=10)
     store = Store(grid, [agent], player, [building])
     sim = Simulation(store, hitboxes_enabled=False)
 

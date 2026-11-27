@@ -1,70 +1,388 @@
 import { useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import * as THREE from 'three'
 import { AgentPosition } from '../hooks/parseAgentsMessage'
-import { BuildingFootprint } from '../hooks/parseBuildingsMessage'
+import { TownEntity } from '../hooks/parseTownMessage'
 import { Villager } from '../hooks/mergeVillagerData'
+import { RouteTile } from '../hooks/parseRoutesMessage'
+import { viewYaw } from '../hooks/viewRotation'
+import { PLAYER_TARGET } from '../CameraPicker'
+import { landRectangles } from './landRectangles'
+
+const SEA_LEVEL = -0.4
+const ISLAND_DEPTH = 3
+const DIRT_COLOR = 0x7a5a3c
+
+// Flat kinds get a tiny lift each so overlapping floors don't flicker; the dock sits above the sea.
+const KIND_STYLES: Record<string, { color: number; height: number; lift: number }> = {
+  zone: { color: 0xd9c38c, height: 0, lift: 0.01 },
+  water: { color: 0x2b6cb0, height: 0, lift: SEA_LEVEL },
+  dock: { color: 0x8b5a2b, height: 0, lift: 0.03 },
+  forest: { color: 0x1f4d2b, height: 1.5, lift: 0 },
+  building: { color: 0x8a8a8a, height: 2, lift: 0 },
+  landmark: { color: 0xc4c4c4, height: 3, lift: 0 },
+}
+const UNKNOWN_KIND_STYLE = { color: 0xff00ff, height: 1, lift: 0 }
+
+// Above every floor lift so lines never tie with a floor.
+const GRID_LINE_HEIGHT = 0.05
+const BORDER_HEIGHT = 0.06
+const ROUTE_HEIGHT = 0.15
+const ROUTE_MATERIAL = new THREE.LineBasicMaterial({ color: 0xffcc00 })
+
+const SKY_COLOR = 0xa8d4ef
+const GRASS_COLOR = 0x6a9a4f
+const SUN_COLOR = 0xffe0b0
+
+// Brightness steps every surface snaps to: shadow, mid, lit.
+const TOON_STEPS = new THREE.DataTexture(new Uint8Array([90, 170, 255]), 3, 1, THREE.RedFormat)
+TOON_STEPS.minFilter = THREE.NearestFilter
+TOON_STEPS.magFilter = THREE.NearestFilter
+TOON_STEPS.generateMipmaps = false
+TOON_STEPS.needsUpdate = true
+
+// Front faces cast shadows so a shadow starts right at a wall's base instead of leaving a lit seam.
+function toonMaterial(color: number): THREE.MeshToonMaterial {
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS, shadowSide: THREE.FrontSide })
+}
+
+const WATER_BANDS = 5.0
+// Sparkles appear only where the waves are higher than this, on a 0 to 1 scale.
+const SPARKLE_CREST = 0.78
+// Share of each twinkle cycle a crest cell spends lit.
+const SPARKLE_DENSITY = 0.3
+const WATER_TIME = { value: 0 }
+
+// Extends the standard lit material so the sea keeps sunlight, shadows, and fog.
+// Ripples only tilt the surface for lighting; real height changes would poke through the dock and grid.
+// Ripples come from world position so neighbouring water pieces join without seams.
+function makeWaterMaterial(color: number): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.1 })
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = WATER_TIME
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec2 vWaterPos;`,
+      )
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+vWaterPos = (modelMatrix * vec4(transformed, 1.0)).xz;`,
+      )
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uTime;
+varying vec2 vWaterPos;`,
+      )
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+float phase1 = dot(vWaterPos, vec2(0.94, 0.34)) * 0.37 + uTime * 0.9;
+float phase2 = dot(vWaterPos, vec2(0.26, 0.97)) * 0.53 - uTime * 1.3;
+float phase3 = dot(vWaterPos, vec2(-0.64, 0.77)) * 0.71 + uTime * 1.7;
+float phase4 = dot(vWaterPos, vec2(-0.98, 0.17)) * 1.13 - uTime * 0.6;
+// Four waves in uneven directions and sizes; two straight crossing waves would tile into a grid of blobs.
+vec2 slope = 0.30 * cos(phase1) * vec2(0.94, 0.34)
+  + 0.25 * cos(phase2) * vec2(0.26, 0.97)
+  + 0.20 * cos(phase3) * vec2(-0.64, 0.77)
+  + 0.15 * cos(phase4) * vec2(-0.98, 0.17);
+float crest = (0.30 * sin(phase1) + 0.25 * sin(phase2) + 0.20 * sin(phase3) + 0.15 * sin(phase4)) / 0.9 * 0.5 + 0.5;
+// Water is always flat, so the tilted surface direction can be built straight in world space.
+normal = normalize((viewMatrix * vec4(normalize(vec3(-slope.x, 1.0, -slope.y)), 0.0)).xyz);`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+float shimmer = 0.6 * sin(vWaterPos.x * 1.3 + vWaterPos.y * 0.4 + uTime * 1.5)
+  + 0.4 * sin(vWaterPos.y * 1.1 - vWaterPos.x * 0.7 - uTime * 1.2);
+diffuseColor.rgb += shimmer * 0.04;`,
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `float brightness = dot(outgoingLight, vec3(0.299, 0.587, 0.114));
+float steppedBrightness = ceil(brightness * ${WATER_BANDS.toFixed(1)}) / ${WATER_BANDS.toFixed(1)};
+outgoingLight *= steppedBrightness / max(brightness, 0.001);
+// Sparkles sit on the highest crests and twinkle; unlike sun glints they look the same from every side.
+float twinkle = fract(sin(dot(floor(vWaterPos * 2.0), vec2(12.9898, 78.233))) * 43758.5453);
+float sparkle = step(${SPARKLE_CREST.toFixed(2)}, crest)
+  * step(${(1 - SPARKLE_DENSITY).toFixed(2)}, fract(twinkle + uTime * 0.7));
+outgoingLight = mix(outgoingLight, vec3(1.0), sparkle * clamp(brightness * 1.5, 0.0, 1.0));
+#include <opaque_fragment>`,
+      )
+  }
+  return material
+}
+
+const BODY_HEIGHT = 0.5
+// Matches the server: one tile per 0.5-second tick.
+const MIN_GLIDE_SPEED = 2
+const CATCH_UP_RATE = 6
+const SNAP_DISTANCE = 4
+const BOB_SPEED = 14
+const BOB_HEIGHT = 0.12
+const glideDirection = new THREE.Vector3()
+
+function glide(mesh: THREE.Mesh, delta: number, time: number) {
+  const target = mesh.userData.target as THREE.Vector3 | undefined
+  if (!target) return
+  glideDirection.set(target.x - mesh.position.x, 0, target.z - mesh.position.z)
+  const distance = glideDirection.length()
+  if (distance > SNAP_DISTANCE) {
+    mesh.position.set(target.x, BODY_HEIGHT, target.z)
+    return
+  }
+  const speed = Math.max(MIN_GLIDE_SPEED, distance * CATCH_UP_RATE)
+  const step = Math.min(distance, speed * delta)
+  if (distance > 0) {
+    mesh.position.addScaledVector(glideDirection.normalize(), step)
+  }
+  const stillMoving = distance - step > 0.001
+  mesh.position.y = stillMoving
+    ? BODY_HEIGHT + Math.abs(Math.sin(time * BOB_SPEED)) * BOB_HEIGHT
+    : BODY_HEIGHT
+}
+
+// Screen pixels per art pixel. Higher is chunkier.
+const PIXEL_SIZE = 3
+
+const OUTLINE_DARKEN = 0.8
+const CREASE_DARKEN = 1.0
+// A depth jump counts as an edge only past this many pixels' worth. Flat ground tilted at 30 degrees
+// rises about 1.7 pixels' worth per pixel, so anything below that would outline the whole floor.
+const OUTLINE_DEPTH_GAP_PIXELS = 2.5
+// Faces meeting more sharply than this get a crease line.
+const CREASE_NORMAL_DOT = 0.7
+
+const OUTLINE_VERTEX = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}`
+
+const OUTLINE_FRAGMENT = `
+uniform sampler2D tColor;
+uniform sampler2D tDepth;
+uniform sampler2D tNormal;
+uniform vec2 texel;
+uniform float depthGap;
+varying vec2 vUv;
+
+void checkNeighbor(vec2 offset, float depth, vec3 normal, inout float outline, inout float crease) {
+  vec2 neighborUv = vUv + offset * texel;
+  float neighborDepth = texture2D(tDepth, neighborUv).x;
+  vec3 neighborNormal = texture2D(tNormal, neighborUv).xyz * 2.0 - 1.0;
+  // Only the nearer side of an edge darkens, so outlines stay one pixel wide.
+  if (neighborDepth - depth > depthGap) {
+    outline = 1.0;
+  } else if (abs(neighborDepth - depth) < depthGap && dot(normal, neighborNormal) < ${CREASE_NORMAL_DOT.toFixed(2)}) {
+    crease = 1.0;
+  }
+}
+
+void main() {
+  vec4 color = texture2D(tColor, vUv);
+  float depth = texture2D(tDepth, vUv).x;
+  vec3 normal = texture2D(tNormal, vUv).xyz * 2.0 - 1.0;
+  float outline = 0.0;
+  float crease = 0.0;
+  checkNeighbor(vec2(1.0, 0.0), depth, normal, outline, crease);
+  checkNeighbor(vec2(-1.0, 0.0), depth, normal, outline, crease);
+  checkNeighbor(vec2(0.0, 1.0), depth, normal, outline, crease);
+  checkNeighbor(vec2(0.0, -1.0), depth, normal, outline, crease);
+  if (outline > 0.0) {
+    color.rgb *= ${OUTLINE_DARKEN.toFixed(2)};
+  } else if (crease > 0.0) {
+    color.rgb *= ${CREASE_DARKEN.toFixed(2)};
+  }
+  gl_FragColor = color;
+}`
+
+// Half the height of the sharp band, as a fraction of the screen.
+const FOCUS_HALF_HEIGHT = 0.18
+const MAX_BLUR_PIXELS = 3.0
+const SATURATION = 1.1
+const VIGNETTE_STRENGTH = 0.25
+
+const TILT_SHIFT_FRAGMENT = `
+uniform sampler2D tScene;
+uniform vec2 texel;
+varying vec2 vUv;
+
+vec3 sampleAt(vec2 offset) {
+  return texture2D(tScene, vUv + offset * texel).rgb;
+}
+
+void main() {
+  float distanceFromFocus = abs(vUv.y - 0.5);
+  float blur = smoothstep(${FOCUS_HALF_HEIGHT.toFixed(2)}, 0.5, distanceFromFocus) * ${MAX_BLUR_PIXELS.toFixed(1)};
+  vec3 color = sampleAt(vec2(0.0));
+  if (blur > 0.5) {
+    vec3 sum = color;
+    float count = 1.0;
+    // Two rings of 8 samples; each lands on a whole art pixel, so the blur stays pixelated.
+    for (int i = 0; i < 8; i++) {
+      float angle = float(i) * 0.785398;
+      vec2 direction = vec2(cos(angle), sin(angle));
+      sum += sampleAt(direction * blur);
+      sum += sampleAt(direction * blur * 0.5);
+      count += 2.0;
+    }
+    color = sum / count;
+  }
+  float gray = dot(color, vec3(0.299, 0.587, 0.114));
+  color = mix(vec3(gray), color, ${SATURATION.toFixed(2)});
+  float vignette = 1.0 - ${VIGNETTE_STRENGTH.toFixed(2)} * smoothstep(0.3, 0.75, length(vUv - 0.5));
+  gl_FragColor = vec4(color * vignette, 1.0);
+  #include <colorspace_fragment>
+}`
+
+
+const TURN_SPEED = 8
+const ZOOM_STEP = 1.25
+const ZOOM_SPEED = 10
+// About 30 degrees down gives the 2:1 pixel slopes isometric pixel art uses.
+const ISO_PITCH = Math.PI / 6
+
+// How quickly the camera catches up to who it follows; higher is snappier.
+const FOLLOW_SMOOTHING = 4
+// A press counts as a drag only after moving this far, so clicks stay clicks.
+const DRAG_THRESHOLD_PX = 4
+const PICK_RADIUS_PX = 24
+
+const PERF_REPORT_MS = 500
+
+const PERF_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: 12,
+  left: 12,
+  padding: '4px 8px',
+  background: 'rgba(0, 0, 0, 0.75)',
+  color: '#7CFC00',
+  fontFamily: 'monospace',
+  fontSize: 12,
+  borderRadius: 6,
+  pointerEvents: 'none',
+  display: 'none',
+}
+
+const LABEL_STYLE: Partial<CSSStyleDeclaration> = {
+  position: 'absolute',
+  transform: 'translate(-50%, -50%)',
+  color: 'white',
+  fontSize: '11px',
+  fontFamily: 'sans-serif',
+  textShadow: '0 0 3px black',
+  whiteSpace: 'nowrap',
+  pointerEvents: 'none',
+}
 
 interface AgentSceneProps {
   agents: Villager[]
   player: AgentPosition | null
-  buildings: BuildingFootprint[]
+  town: TownEntity[]
   gridWidth: number
   gridHeight: number
   showGridLines: boolean
   nearbyVillager: Villager | null
   talkingVillager: Villager | null
+  routes: Map<string, RouteTile[]>
+  showRoutes: boolean
+  viewTurns: number
+  followTarget: string | null
+  onFollowChange: (target: string | null) => void
+  zoomLevel: number
+  showPerformance: boolean
 }
 
 export function AgentScene({
   agents,
   player,
-  buildings,
+  town,
   gridWidth,
   gridHeight,
   showGridLines,
   nearbyVillager,
   talkingVillager,
+  routes,
+  showRoutes,
+  viewTurns,
+  followTarget,
+  onFollowChange,
+  zoomLevel,
+  showPerformance,
 }: AgentSceneProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
+  const overlaySceneRef = useRef<THREE.Scene | null>(null)
   const meshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const playerMeshRef = useRef<THREE.Mesh | null>(null)
-  const buildingMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
+  const townMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
+  const townLabelsRef = useRef<{ entity: TownEntity; element: HTMLDivElement }[]>([])
+  const labelLayerRef = useRef<HTMLDivElement>(null)
+  const followTargetRef = useRef(followTarget)
+  const onFollowChangeRef = useRef(onFollowChange)
+  const zoomLevelRef = useRef(zoomLevel)
+  const perfRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (perfRef.current) {
+      perfRef.current.style.display = showPerformance ? 'block' : 'none'
+    }
+  }, [showPerformance])
+
+  useEffect(() => {
+    zoomLevelRef.current = zoomLevel
+  }, [zoomLevel])
+
+  useEffect(() => {
+    followTargetRef.current = followTarget
+  }, [followTarget])
+
+  useEffect(() => {
+    onFollowChangeRef.current = onFollowChange
+  }, [onFollowChange])
+  const routeLinesRef = useRef<THREE.Line[]>([])
   const gridLinesRef = useRef<THREE.LineSegments | null>(null)
+  const borderRef = useRef<THREE.Line | null>(null)
   const promptRef = useRef<HTMLDivElement>(null)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const nearbyVillagerRef = useRef<Villager | null>(null)
   const talkingVillagerRef = useRef<Villager | null>(null)
+  const targetYawRef = useRef(viewYaw(0))
+
+  useEffect(() => {
+    targetYawRef.current = viewYaw(viewTurns)
+  }, [viewTurns])
 
   useEffect(() => {
     const mount = mountRef.current
     if (!mount) return
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x1a1a2e)
+    scene.background = new THREE.Color(SKY_COLOR)
     sceneRef.current = scene
 
-    const camera = new THREE.PerspectiveCamera(
-      60,
-      mount.clientWidth / mount.clientHeight,
-      0.1,
-      1000,
-    )
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000)
 
     // The larger dimension sets default framing/max zoom-out (so the whole
     // board can come into view); the smaller sets min zoom-in (so a long,
     // narrow board doesn't stop you from getting close).
     const gridSpan = Math.max(gridWidth, gridHeight)
     const gridMinSpan = Math.min(gridWidth, gridHeight)
-
     const cameraTarget = new THREE.Vector3(gridWidth / 2, 0, gridHeight / 2)
-    const cameraDirection = new THREE.Vector3(0, gridSpan * 0.8, gridSpan * 0.8).normalize()
-    const MIN_ZOOM_DISTANCE = gridMinSpan * 0.05
-    const MAX_ZOOM_DISTANCE = gridSpan * 1.8
-    // Slightly more than the tightest "fills the whole screen" distance,
-    // so there's visible space around the board instead of it touching
-    // every edge of the window.
-    let cameraDistance = gridSpan * 0.65
+    // With no perspective, distance only has to keep the whole board in front of the camera.
+    const CAMERA_BACKOFF = gridSpan * 2
+    const MIN_VIEW_HEIGHT = gridMinSpan * 0.1
+    const MAX_VIEW_HEIGHT = gridSpan * 1.3
+    const DEFAULT_VIEW_HEIGHT = gridSpan * 0.6
+    let viewHeight = DEFAULT_VIEW_HEIGHT
+
+    scene.fog = new THREE.Fog(SKY_COLOR, CAMERA_BACKOFF + gridSpan * 0.3, CAMERA_BACKOFF + gridSpan * 1.2)
 
     // How far past the town's edge you're allowed to drag the view.
     const PAN_MARGIN = gridSpan * 0.3
@@ -73,11 +391,57 @@ export function AgentScene({
     const PAN_Z_MIN = -PAN_MARGIN
     const PAN_Z_MAX = gridHeight + PAN_MARGIN
 
-    const updateCameraPosition = () => {
-      camera.position.copy(cameraTarget).addScaledVector(cameraDirection, cameraDistance)
+    const artSize = () => ({
+      width: Math.floor(mount.clientWidth / PIXEL_SIZE),
+      height: Math.floor(mount.clientHeight / PIXEL_SIZE),
+    })
+
+    let currentYaw = targetYawRef.current
+    const cameraDirection = new THREE.Vector3()
+    const screenRight = new THREE.Vector3()
+    const screenUp = new THREE.Vector3()
+    const groundForward = new THREE.Vector3()
+    const groundRight = new THREE.Vector3()
+    const worldUp = new THREE.Vector3(0, 1, 0)
+
+    const applyYaw = (yaw: number) => {
+      cameraDirection.set(
+        Math.sin(yaw) * Math.cos(ISO_PITCH),
+        Math.sin(ISO_PITCH),
+        Math.cos(yaw) * Math.cos(ISO_PITCH),
+      )
+      camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
       camera.lookAt(cameraTarget)
+      camera.updateMatrixWorld()
+      screenRight.setFromMatrixColumn(camera.matrixWorld, 0)
+      screenUp.setFromMatrixColumn(camera.matrixWorld, 1)
+      groundForward.set(-cameraDirection.x, 0, -cameraDirection.z).normalize()
+      groundRight.copy(groundForward).cross(worldUp).normalize()
     }
-    updateCameraPosition()
+    applyYaw(currentYaw)
+
+    const updateCameraPosition = () => {
+      camera.position.copy(cameraTarget).addScaledVector(cameraDirection, CAMERA_BACKOFF)
+      // Snap to whole art pixels so still objects land on the same pixels every frame.
+      const pixel = viewHeight / artSize().height
+      const alongRight = camera.position.dot(screenRight)
+      const alongUp = camera.position.dot(screenUp)
+      camera.position.addScaledVector(screenRight, Math.round(alongRight / pixel) * pixel - alongRight)
+      camera.position.addScaledVector(screenUp, Math.round(alongUp / pixel) * pixel - alongUp)
+    }
+    const updateCameraFrame = () => {
+      const { width, height } = artSize()
+      const aspect = width / height
+      camera.left = (-viewHeight * aspect) / 2
+      camera.right = (viewHeight * aspect) / 2
+      camera.top = viewHeight / 2
+      camera.bottom = -viewHeight / 2
+      camera.far = CAMERA_BACKOFF * 3
+      camera.updateProjectionMatrix()
+      // A zoom changes how big an art pixel is in the world, so the snap has to be redone.
+      updateCameraPosition()
+    }
+    updateCameraFrame()
 
     // Projects a ground-plane (x, y) tile position to on-screen pixel
     // coordinates, for positioning the HTML prompt/bubble overlays above a
@@ -93,52 +457,85 @@ export function AgentScene({
 
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault()
-      cameraDistance = THREE.MathUtils.clamp(
-        cameraDistance + event.deltaY * 0.05,
-        MIN_ZOOM_DISTANCE,
-        MAX_ZOOM_DISTANCE,
-      )
-      updateCameraPosition()
     }
     mount.addEventListener('wheel', handleWheel, { passive: false })
     mount.style.cursor = 'grab'
 
-    // Drag (mouse or touch) slides the camera across the ground at the same fixed angle.
-    const groundForward = new THREE.Vector3(
-      cameraTarget.x - camera.position.x,
-      0,
-      cameraTarget.z - camera.position.z,
-    ).normalize()
-    const groundRight = groundForward.clone().cross(new THREE.Vector3(0, 1, 0)).normalize()
+    const screenPositionOf = (position: THREE.Vector3) => {
+      const vector = position.clone().project(camera)
+      return {
+        left: ((vector.x + 1) / 2) * mount.clientWidth,
+        top: ((1 - vector.y) / 2) * mount.clientHeight,
+      }
+    }
+
+    const followedMesh = () => {
+      const target = followTargetRef.current
+      if (target === null) return null
+      if (target === PLAYER_TARGET) return playerMeshRef.current
+      return meshesRef.current.get(target) ?? null
+    }
+
+    const pickAt = (event: PointerEvent) => {
+      const rect = mount.getBoundingClientRect()
+      const x = event.clientX - rect.left
+      const y = event.clientY - rect.top
+      const candidates: [string, THREE.Mesh][] = Array.from(meshesRef.current.entries())
+      if (playerMeshRef.current) candidates.push([PLAYER_TARGET, playerMeshRef.current])
+
+      let picked: string | null = null
+      let closest = PICK_RADIUS_PX
+      for (const [id, mesh] of candidates) {
+        const spot = screenPositionOf(mesh.position)
+        const distance = Math.hypot(spot.left - x, spot.top - y)
+        if (distance < closest) {
+          picked = id
+          closest = distance
+        }
+      }
+      if (picked !== null) onFollowChangeRef.current(picked)
+    }
 
     let isDragging = false
+    let pointerIsDown = false
+    let downX = 0
+    let downY = 0
     let lastPointerX = 0
     let lastPointerY = 0
 
     const handlePointerDown = (event: PointerEvent) => {
-      isDragging = true
-      lastPointerX = event.clientX
-      lastPointerY = event.clientY
+      pointerIsDown = true
+      isDragging = false
+      downX = lastPointerX = event.clientX
+      downY = lastPointerY = event.clientY
       mount.setPointerCapture(event.pointerId)
       mount.style.cursor = 'grabbing'
     }
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (!isDragging) return
+      if (!pointerIsDown) return
+      if (!isDragging) {
+        if (Math.hypot(event.clientX - downX, event.clientY - downY) < DRAG_THRESHOLD_PX) return
+        isDragging = true
+        onFollowChangeRef.current(null)
+      }
       const deltaX = event.clientX - lastPointerX
       const deltaY = event.clientY - lastPointerY
       lastPointerX = event.clientX
       lastPointerY = event.clientY
 
-      const panScale = (cameraDistance / mount.clientHeight) * 1.2
-      cameraTarget.addScaledVector(groundRight, -deltaX * panScale)
-      cameraTarget.addScaledVector(groundForward, deltaY * panScale)
+      const worldPerPixel = viewHeight / mount.clientHeight
+      cameraTarget.addScaledVector(groundRight, -deltaX * worldPerPixel)
+      // The ground is tilted away from the camera, so vertical drags cover more ground per pixel.
+      cameraTarget.addScaledVector(groundForward, (deltaY * worldPerPixel) / Math.sin(ISO_PITCH))
       cameraTarget.x = THREE.MathUtils.clamp(cameraTarget.x, PAN_X_MIN, PAN_X_MAX)
       cameraTarget.z = THREE.MathUtils.clamp(cameraTarget.z, PAN_Z_MIN, PAN_Z_MAX)
       updateCameraPosition()
     }
 
     const handlePointerUp = (event: PointerEvent) => {
+      if (pointerIsDown && !isDragging) pickAt(event)
+      pointerIsDown = false
       isDragging = false
       mount.releasePointerCapture(event.pointerId)
       mount.style.cursor = 'grab'
@@ -149,35 +546,91 @@ export function AgentScene({
     mount.addEventListener('pointerup', handlePointerUp)
     mount.addEventListener('pointercancel', handlePointerUp)
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    const renderer = new THREE.WebGLRenderer({ antialias: false })
+    renderer.setPixelRatio(1 / PIXEL_SIZE)
+    renderer.domElement.style.imageRendering = 'pixelated'
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.BasicShadowMap
+    // Each frame renders several passes; count them all instead of only the last one.
+    renderer.info.autoReset = false
+    let framesSinceReport = 0
+    let lastReport = performance.now()
     mount.appendChild(renderer.domElement)
 
+    // Dev overlays draw on their own full-resolution canvas so they stay thin and crisp over the pixel art.
+    const overlayScene = new THREE.Scene()
+    overlaySceneRef.current = overlayScene
+    const overlayRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    overlayRenderer.setPixelRatio(window.devicePixelRatio)
+    Object.assign(overlayRenderer.domElement.style, {
+      position: 'absolute',
+      inset: '0',
+      pointerEvents: 'none',
+    })
+    mount.appendChild(overlayRenderer.domElement)
+
+    const colorTarget = new THREE.WebGLRenderTarget(1, 1, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    })
+    colorTarget.depthTexture = new THREE.DepthTexture(1, 1)
+    const normalTarget = new THREE.WebGLRenderTarget(1, 1, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    })
+    const normalMaterial = new THREE.MeshNormalMaterial()
+    const outlineMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tColor: { value: colorTarget.texture },
+        tDepth: { value: colorTarget.depthTexture },
+        tNormal: { value: normalTarget.texture },
+        texel: { value: new THREE.Vector2() },
+        depthGap: { value: 0 },
+      },
+      vertexShader: OUTLINE_VERTEX,
+      fragmentShader: OUTLINE_FRAGMENT,
+    })
+    const outlineScene = new THREE.Scene()
+    outlineScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), outlineMaterial))
+    const outlineCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+
+    const outlinedTarget = new THREE.WebGLRenderTarget(1, 1, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    })
+    const tiltShiftMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tScene: { value: outlinedTarget.texture },
+        texel: { value: new THREE.Vector2() },
+      },
+      vertexShader: OUTLINE_VERTEX,
+      fragmentShader: TILT_SHIFT_FRAGMENT,
+    })
+    const tiltShiftScene = new THREE.Scene()
+    tiltShiftScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), tiltShiftMaterial))
+
     const handleResize = () => {
-      const width = mount.clientWidth
-      const height = mount.clientHeight
-      camera.aspect = width / height
-      camera.updateProjectionMatrix()
-      renderer.setSize(width, height)
+      const { width, height } = artSize()
+      updateCameraFrame()
+      renderer.setSize(width * PIXEL_SIZE, height * PIXEL_SIZE)
+      overlayRenderer.setSize(width * PIXEL_SIZE, height * PIXEL_SIZE)
+      colorTarget.setSize(width, height)
+      normalTarget.setSize(width, height)
+      outlineMaterial.uniforms.texel.value.set(1 / width, 1 / height)
+      outlinedTarget.setSize(width, height)
+      tiltShiftMaterial.uniforms.texel.value.set(1 / width, 1 / height)
     }
     handleResize()
     window.addEventListener('resize', handleResize)
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(gridWidth, gridHeight),
-      new THREE.MeshStandardMaterial({ color: 0x3a5a40 }),
-    )
-    ground.rotation.x = -Math.PI / 2
-    ground.position.set(gridWidth / 2, 0, gridHeight / 2)
-    scene.add(ground)
 
     // Built manually (rather than THREE.GridHelper, which only draws a
     // square) so the lines exactly match a non-square board's real shape.
     const gridLinePoints: number[] = []
     for (let x = 0; x <= gridWidth; x++) {
-      gridLinePoints.push(x, 0.01, 0, x, 0.01, gridHeight)
+      gridLinePoints.push(x, GRID_LINE_HEIGHT, 0, x, GRID_LINE_HEIGHT, gridHeight)
     }
     for (let z = 0; z <= gridHeight; z++) {
-      gridLinePoints.push(0, 0.01, z, gridWidth, 0.01, z)
+      gridLinePoints.push(0, GRID_LINE_HEIGHT, z, gridWidth, GRID_LINE_HEIGHT, z)
     }
     const gridLineGeometry = new THREE.BufferGeometry()
     gridLineGeometry.setAttribute(
@@ -186,41 +639,151 @@ export function AgentScene({
     )
     const gridLines = new THREE.LineSegments(
       gridLineGeometry,
-      new THREE.LineBasicMaterial({ color: 0x000000 }),
+      new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }),
     )
     gridLines.visible = showGridLines
-    scene.add(gridLines)
+    overlayScene.add(gridLines)
     gridLinesRef.current = gridLines
 
     const borderPoints = [
-      new THREE.Vector3(0, 0.02, 0),
-      new THREE.Vector3(gridWidth, 0.02, 0),
-      new THREE.Vector3(gridWidth, 0.02, gridHeight),
-      new THREE.Vector3(0, 0.02, gridHeight),
-      new THREE.Vector3(0, 0.02, 0),
+      new THREE.Vector3(0, BORDER_HEIGHT, 0),
+      new THREE.Vector3(gridWidth, BORDER_HEIGHT, 0),
+      new THREE.Vector3(gridWidth, BORDER_HEIGHT, gridHeight),
+      new THREE.Vector3(0, BORDER_HEIGHT, gridHeight),
+      new THREE.Vector3(0, BORDER_HEIGHT, 0),
     ]
     const borderGeometry = new THREE.BufferGeometry().setFromPoints(borderPoints)
     const border = new THREE.Line(
       borderGeometry,
       new THREE.LineBasicMaterial({ color: 0xffffff }),
     )
-    scene.add(border)
+    border.visible = showGridLines
+    overlayScene.add(border)
+    borderRef.current = border
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
-    scene.add(ambientLight)
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
-    directionalLight.position.set(10, 20, 10)
-    scene.add(directionalLight)
+    const skyLight = new THREE.HemisphereLight(0xcfe8ff, 0x5a7d4a, 1.2)
+    scene.add(skyLight)
+
+    const sun = new THREE.DirectionalLight(SUN_COLOR, 2.2)
+    sun.position.set(gridWidth / 2 - gridSpan * 0.4, gridSpan * 0.6, gridHeight / 2 - gridSpan * 0.3)
+    sun.target.position.set(gridWidth / 2, 0, gridHeight / 2)
+    sun.castShadow = true
+    sun.shadow.mapSize.set(2048, 2048)
+    // The shadow camera has to cover the whole board or shadows get cut off at its edge.
+    const shadowReach = gridSpan * 0.75
+    sun.shadow.camera.left = -shadowReach
+    sun.shadow.camera.right = shadowReach
+    sun.shadow.camera.top = shadowReach
+    sun.shadow.camera.bottom = -shadowReach
+    sun.shadow.camera.near = 1
+    sun.shadow.camera.far = gridSpan * 3
+    sun.shadow.bias = -0.002
+    sun.shadow.normalBias = 0.02
+    scene.add(sun)
+    scene.add(sun.target)
+
+    // Open sea in every direction; the fog fades it into the sky before its far edge shows.
+    const oceanReach = gridSpan * 3
+    const oceanMaterial = makeWaterMaterial(KIND_STYLES.water.color)
+    const oceanStrips = [
+      { x: -oceanReach, z: -oceanReach, width: gridWidth + oceanReach * 2, depth: oceanReach },
+      { x: -oceanReach, z: gridHeight, width: gridWidth + oceanReach * 2, depth: oceanReach },
+      { x: -oceanReach, z: 0, width: oceanReach, depth: gridHeight },
+      { x: gridWidth, z: 0, width: oceanReach, depth: gridHeight },
+    ]
+    for (const strip of oceanStrips) {
+      const ocean = new THREE.Mesh(new THREE.PlaneGeometry(strip.width, strip.depth), oceanMaterial)
+      ocean.rotation.x = -Math.PI / 2
+      ocean.position.set(strip.x + strip.width / 2, SEA_LEVEL, strip.z + strip.depth / 2)
+      ocean.receiveShadow = true
+      scene.add(ocean)
+    }
+
+    const clock = new THREE.Clock()
+    const screenSpotOf = (villager: Villager) => {
+      const mesh = meshesRef.current.get(villager.id)
+      if (!mesh) return projectToScreen(villager.x, villager.y)
+      return projectToScreen(mesh.position.x - 0.5, mesh.position.z - 0.5)
+    }
 
     let frameId: number
     const animate = () => {
+      renderer.info.reset()
+      const delta = clock.getDelta()
+      if (currentYaw !== targetYawRef.current) {
+        const remaining = targetYawRef.current - currentYaw
+        // Land exactly on the target so pixel snapping returns to a fixed grid after the turn.
+        currentYaw =
+          Math.abs(remaining) < 0.001
+            ? targetYawRef.current
+            : currentYaw + remaining * Math.min(1, delta * TURN_SPEED)
+        applyYaw(currentYaw)
+        updateCameraPosition()
+      }
+
+      const targetViewHeight = THREE.MathUtils.clamp(
+        DEFAULT_VIEW_HEIGHT / ZOOM_STEP ** zoomLevelRef.current,
+        MIN_VIEW_HEIGHT,
+        MAX_VIEW_HEIGHT,
+      )
+      if (viewHeight !== targetViewHeight) {
+        const remaining = targetViewHeight - viewHeight
+        viewHeight =
+          Math.abs(remaining) < 0.01
+            ? targetViewHeight
+            : viewHeight + remaining * Math.min(1, delta * ZOOM_SPEED)
+        updateCameraFrame()
+      }
+      WATER_TIME.value = clock.elapsedTime
+      for (const mesh of meshesRef.current.values()) {
+        glide(mesh, delta, clock.elapsedTime)
+      }
+      if (playerMeshRef.current) {
+        glide(playerMeshRef.current, delta, clock.elapsedTime)
+      }
+
+      const followed = followedMesh()
+      if (followed && !isDragging) {
+        const ease = 1 - Math.exp(-delta * FOLLOW_SMOOTHING)
+        cameraTarget.x += (followed.position.x - cameraTarget.x) * ease
+        cameraTarget.z += (followed.position.z - cameraTarget.z) * ease
+        updateCameraPosition()
+      }
+
+      const worldPerPixel = viewHeight / artSize().height
+      // The isometric camera stores depth evenly from near to far, so a world gap divides straight in.
+      outlineMaterial.uniforms.depthGap.value =
+        (worldPerPixel * OUTLINE_DEPTH_GAP_PIXELS) / (camera.far - camera.near)
+
+      renderer.setRenderTarget(colorTarget)
       renderer.render(scene, camera)
+      scene.overrideMaterial = normalMaterial
+      renderer.setRenderTarget(normalTarget)
+      renderer.render(scene, camera)
+      scene.overrideMaterial = null
+      renderer.setRenderTarget(outlinedTarget)
+      renderer.render(outlineScene, outlineCamera)
+      renderer.setRenderTarget(null)
+      renderer.render(tiltShiftScene, outlineCamera)
+      overlayRenderer.render(overlayScene, camera)
+
+      framesSinceReport += 1
+      const now = performance.now()
+      const perfEl = perfRef.current
+      if (perfEl && now - lastReport >= PERF_REPORT_MS) {
+        const fps = (framesSinceReport * 1000) / (now - lastReport)
+        const drawCalls = renderer.info.render.calls + overlayRenderer.info.render.calls
+        const triangles = renderer.info.render.triangles + overlayRenderer.info.render.triangles
+        perfEl.textContent = `${fps.toFixed(0)} fps, ${drawCalls} draw calls, ${triangles} triangles`
+        framesSinceReport = 0
+        lastReport = now
+      }
 
       const promptEl = promptRef.current
       const nearby = nearbyVillagerRef.current
       if (promptEl) {
         if (nearby) {
-          const { left, top } = projectToScreen(nearby.x, nearby.y)
+          const { left, top } = screenSpotOf(nearby)
           promptEl.style.left = `${left}px`
           promptEl.style.top = `${top}px`
           promptEl.style.display = 'block'
@@ -233,7 +796,7 @@ export function AgentScene({
       const talking = talkingVillagerRef.current
       if (bubbleEl) {
         if (talking) {
-          const { left, top } = projectToScreen(talking.x, talking.y)
+          const { left, top } = screenSpotOf(talking)
           bubbleEl.style.left = `${left}px`
           bubbleEl.style.top = `${top}px`
           bubbleEl.style.display = 'block'
@@ -241,6 +804,15 @@ export function AgentScene({
         } else {
           bubbleEl.style.display = 'none'
         }
+      }
+
+      for (const { entity, element } of townLabelsRef.current) {
+        const { left, top } = projectToScreen(
+          entity.x + entity.width / 2 - 0.5,
+          entity.y + entity.height / 2 - 0.5,
+        )
+        element.style.left = `${left}px`
+        element.style.top = `${top}px`
       }
 
       frameId = requestAnimationFrame(animate)
@@ -257,16 +829,55 @@ export function AgentScene({
       cancelAnimationFrame(frameId)
       mount.removeChild(renderer.domElement)
       renderer.dispose()
+      mount.removeChild(overlayRenderer.domElement)
+      overlayRenderer.dispose()
+      colorTarget.dispose()
+      normalTarget.dispose()
+      normalMaterial.dispose()
+      outlineMaterial.dispose()
+      outlinedTarget.dispose()
+      tiltShiftMaterial.dispose()
+      overlaySceneRef.current = null
       meshesRef.current.clear()
       playerMeshRef.current = null
-      buildingMeshesRef.current.clear()
+      townMeshesRef.current.clear()
+      for (const { element } of townLabelsRef.current) element.remove()
+      townLabelsRef.current = []
+      routeLinesRef.current = []
       gridLinesRef.current = null
     }
   }, [])
 
   useEffect(() => {
+    const overlayScene = overlaySceneRef.current
+    if (!overlayScene) return
+
+    for (const line of routeLinesRef.current) {
+      overlayScene.remove(line)
+      line.geometry.dispose()
+    }
+    routeLinesRef.current = []
+    if (!showRoutes) return
+
+    for (const agent of agents) {
+      const route = routes.get(agent.id)
+      if (!route || route.length === 0) continue
+      const points = [new THREE.Vector3(agent.x + 0.5, ROUTE_HEIGHT, agent.y + 0.5)]
+      for (const tile of route) {
+        points.push(new THREE.Vector3(tile.x + 0.5, ROUTE_HEIGHT, tile.y + 0.5))
+      }
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), ROUTE_MATERIAL)
+      overlayScene.add(line)
+      routeLinesRef.current.push(line)
+    }
+  }, [routes, agents, showRoutes])
+
+  useEffect(() => {
     if (gridLinesRef.current) {
       gridLinesRef.current.visible = showGridLines
+    }
+    if (borderRef.current) {
+      borderRef.current.visible = showGridLines
     }
   }, [showGridLines])
 
@@ -295,12 +906,14 @@ export function AgentScene({
       let mesh = meshesRef.current.get(agent.id)
       if (!mesh) {
         const geometry = new THREE.IcosahedronGeometry(0.4, 0)
-        const material = new THREE.MeshStandardMaterial({ color: 0xe8a87c })
+        const material = toonMaterial(0xe8a87c)
         mesh = new THREE.Mesh(geometry, material)
+        mesh.castShadow = true
         scene.add(mesh)
         meshesRef.current.set(agent.id, mesh)
+        mesh.position.set(agent.x + 0.5, BODY_HEIGHT, agent.y + 0.5)
       }
-      mesh.position.set(agent.x + 0.5, 0.5, agent.y + 0.5)
+      mesh.userData.target = new THREE.Vector3(agent.x + 0.5, BODY_HEIGHT, agent.y + 0.5)
     }
   }, [agents])
 
@@ -319,35 +932,99 @@ export function AgentScene({
     let mesh = playerMeshRef.current
     if (!mesh) {
       const geometry = new THREE.TetrahedronGeometry(0.5, 0)
-      const material = new THREE.MeshStandardMaterial({ color: 0xffff00 })
+      const material = toonMaterial(0xffff00)
       mesh = new THREE.Mesh(geometry, material)
+      mesh.castShadow = true
       scene.add(mesh)
       playerMeshRef.current = mesh
+      mesh.position.set(player.x + 0.5, BODY_HEIGHT, player.y + 0.5)
     }
-    mesh.position.set(player.x + 0.5, 0.5, player.y + 0.5)
+    mesh.userData.target = new THREE.Vector3(player.x + 0.5, BODY_HEIGHT, player.y + 0.5)
   }, [player])
 
   useEffect(() => {
     const scene = sceneRef.current
     if (!scene) return
 
-    for (const building of buildings) {
-      if (buildingMeshesRef.current.has(building.id)) continue
-      const geometry = new THREE.BoxGeometry(building.width, 2, building.height)
-      const material = new THREE.MeshStandardMaterial({ color: 0x808080 })
-      const mesh = new THREE.Mesh(geometry, material)
-      mesh.position.set(
-        building.x + building.width / 2,
-        1,
-        building.y + building.height / 2,
-      )
-      scene.add(mesh)
-      buildingMeshesRef.current.set(building.id, mesh)
+    const labelLayer = labelLayerRef.current
+    if (!labelLayer) return
+
+    if (town.length > 0 && !townMeshesRef.current.has('land-0')) {
+      // The dock sits over water, so it leaves a gap in the land like the sea does.
+      const seaAreas = town.filter((entity) => entity.kind === 'water' || entity.kind === 'dock')
+      const grass = toonMaterial(GRASS_COLOR)
+      const dirt = toonMaterial(DIRT_COLOR)
+      // Box faces in order: east, west, top, bottom, south, north. Only the top is grass.
+      const landFaces = [dirt, dirt, grass, dirt, dirt, dirt]
+      const land = landRectangles(gridWidth, gridHeight, seaAreas)
+      for (let index = 0; index < land.length; index++) {
+        const rect = land[index]
+        const block = new THREE.Mesh(
+          new THREE.BoxGeometry(rect.width, ISLAND_DEPTH, rect.height),
+          landFaces,
+        )
+        block.position.set(rect.x + rect.width / 2, -ISLAND_DEPTH / 2, rect.y + rect.height / 2)
+        block.receiveShadow = true
+        scene.add(block)
+        townMeshesRef.current.set(`land-${index}`, block)
+      }
+
+      // The dock is a pier, so it needs sea underneath or you see the sky through the gap.
+      const waterUnderDocks = makeWaterMaterial(KIND_STYLES.water.color)
+      for (const dock of town.filter((entity) => entity.kind === 'dock')) {
+        const water = new THREE.Mesh(new THREE.PlaneGeometry(dock.width, dock.height), waterUnderDocks)
+        water.rotation.x = -Math.PI / 2
+        water.position.set(dock.x + dock.width / 2, SEA_LEVEL, dock.y + dock.height / 2)
+        water.receiveShadow = true
+        scene.add(water)
+        townMeshesRef.current.set(`water-under-${dock.id}`, water)
+      }
     }
-  }, [buildings])
+
+    for (const entity of town) {
+      if (townMeshesRef.current.has(entity.id)) continue
+      const style = KIND_STYLES[entity.kind] ?? UNKNOWN_KIND_STYLE
+      const isWater = entity.kind === 'water'
+      const material = isWater ? makeWaterMaterial(style.color) : toonMaterial(style.color)
+      const centerX = entity.x + entity.width / 2
+      const centerZ = entity.y + entity.height / 2
+
+      let mesh: THREE.Mesh
+      if (style.height > 0) {
+        mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(entity.width, style.height + ISLAND_DEPTH, entity.height),
+          material,
+        )
+        mesh.position.set(centerX, (style.height - ISLAND_DEPTH) / 2, centerZ)
+        mesh.castShadow = true
+      } else {
+        mesh = new THREE.Mesh(new THREE.PlaneGeometry(entity.width, entity.height), material)
+        mesh.rotation.x = -Math.PI / 2
+        mesh.position.set(centerX, style.lift, centerZ)
+      }
+      // Only floors receive shadows; buildings receiving them would darken their own walls.
+      mesh.receiveShadow = style.height === 0
+      scene.add(mesh)
+      townMeshesRef.current.set(entity.id, mesh)
+
+      const label = document.createElement('div')
+      label.textContent = entity.name
+      Object.assign(label.style, LABEL_STYLE)
+      labelLayer.appendChild(label)
+      townLabelsRef.current.push({ entity, element: label })
+    }
+  }, [town])
 
   return (
-    <div ref={mountRef} style={{ width: '100%', height: '100vh', position: 'relative' }}>
+    <div
+      ref={mountRef}
+      style={{ width: '100%', height: '100vh', position: 'relative', overflow: 'hidden' }}
+    >
+      <div
+        ref={labelLayerRef}
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+      />
+      <div ref={perfRef} style={PERF_STYLE} />
       <div
         ref={promptRef}
         style={{

@@ -15,8 +15,8 @@ class VillagerDef:
 VILLAGERS: list[VillagerDef] = [
     VillagerDef(
         id="villager-1",
-        x=10,
-        y=10,
+        x=45,
+        y=80,
         name="Mira",
         role="Fisherwoman",
         line="The tide's been good to us this week.",
@@ -29,8 +29,8 @@ VILLAGERS: list[VillagerDef] = [
     ),
     VillagerDef(
         id="villager-2",
-        x=25,
-        y=10,
+        x=60,
+        y=50,
         name="Tomas",
         role="Baker",
         line="Fresh bread every morning — come by before it's gone.",
@@ -43,8 +43,8 @@ VILLAGERS: list[VillagerDef] = [
     ),
     VillagerDef(
         id="villager-3",
-        x=17,
-        y=25,
+        x=50,
+        y=45,
         name="Elena",
         role="Merchant",
         line="Business is slow, but the view of the harbor makes up for it.",

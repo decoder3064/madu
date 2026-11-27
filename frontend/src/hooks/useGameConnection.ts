@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { parseAgentsMessage, AgentPosition } from './parseAgentsMessage'
 import { mergeAgents } from './mergeAgents'
 import { parsePlayerPosition } from './parsePlayerPosition'
-import { parseBuildingsMessage, BuildingFootprint } from './parseBuildingsMessage'
+import { parseTownMessage, TownEntity } from './parseTownMessage'
+import { parseRoutesMessage, RouteTile } from './parseRoutesMessage'
 import { parseGridSize, GridSize } from './parseGridSize'
 import { parseVillagerIdentities, VillagerIdentity } from './parseVillagerIdentities'
 import { parseTalkRange } from './parseTalkRange'
@@ -11,16 +12,19 @@ import { mergeVillagerData, Villager } from './mergeVillagerData'
 export interface GameConnection {
   agents: Villager[]
   player: AgentPosition | null
-  buildings: BuildingFootprint[]
+  town: TownEntity[]
   gridSize: GridSize | null
   talkRangeTiles: number
   sendMove: (direction: 'up' | 'down' | 'left' | 'right') => void
+  routes: Map<string, RouteTile[]>
+  sendGoTo: (villagerId: string, placeId: string) => void
 }
 
 export function useGameConnection(url: string): GameConnection {
   const [agents, setAgents] = useState<Map<string, AgentPosition>>(new Map())
   const [player, setPlayer] = useState<AgentPosition | null>(null)
-  const [buildings, setBuildings] = useState<BuildingFootprint[]>([])
+  const [town, setTown] = useState<TownEntity[]>([])
+  const [routes, setRoutes] = useState<Map<string, RouteTile[]>>(new Map())
   const [gridSize, setGridSize] = useState<GridSize | null>(null)
   const [villagerIdentities, setVillagerIdentities] = useState<
     Map<string, VillagerIdentity>
@@ -36,10 +40,11 @@ export function useGameConnection(url: string): GameConnection {
       const incomingAgents = parseAgentsMessage(event.data)
       setAgents((prev) => mergeAgents(prev, incomingAgents))
       setPlayer(parsePlayerPosition(event.data))
+      setRoutes(parseRoutesMessage(event.data))
 
       const data = JSON.parse(event.data)
-      if (data.buildings !== undefined) {
-        setBuildings(parseBuildingsMessage(event.data))
+      if (data.town !== undefined) {
+        setTown(parseTownMessage(event.data))
         setGridSize(parseGridSize(event.data))
         setVillagerIdentities(
           new Map(
@@ -65,12 +70,22 @@ export function useGameConnection(url: string): GameConnection {
     }
   }
 
+  const sendGoTo = (villagerId: string, placeId: string) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({ type: 'go_to', villager_id: villagerId, place_id: placeId }),
+      )
+    }
+  }
+
   return {
     agents: mergeVillagerData(Array.from(agents.values()), villagerIdentities),
     player,
-    buildings,
+    town,
     gridSize,
     talkRangeTiles,
     sendMove,
+    routes,
+    sendGoTo,
   }
 }

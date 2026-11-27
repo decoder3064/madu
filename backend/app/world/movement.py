@@ -1,5 +1,5 @@
 from app.world.grid import Grid
-from app.world.building import Building
+from app.world.town import TownEntity
 from app.world.collision import is_blocked
 
 DIRECTIONS = {
@@ -15,7 +15,7 @@ def apply_move(
     x: int,
     y: int,
     direction: str,
-    buildings: list[Building],
+    buildings: list[TownEntity],
     hitboxes_enabled: bool,
 ) -> tuple[int, int]:
     dx, dy = DIRECTIONS[direction]

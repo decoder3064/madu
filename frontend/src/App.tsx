@@ -5,13 +5,27 @@ import { useDevModeToggle } from './hooks/useDevModeToggle'
 import { useTalkTrigger } from './hooks/useTalkTrigger'
 import { findNearbyVillager } from './hooks/findNearbyVillager'
 import { AgentScene } from './scene/AgentScene'
+import { DevPanel } from './DevPanel'
+import { useViewRotation } from './hooks/useViewRotation'
+import { gridDirectionForKey } from './hooks/viewRotation'
+import { CameraPicker, PLAYER_TARGET } from './CameraPicker'
+import { useFollowMeKey } from './hooks/useFollowMeKey'
+import { ZoomControls, ZOOM_MAX_LEVEL, ZOOM_MIN_LEVEL } from './ZoomControls'
+import { useZoomKeys } from './hooks/useZoomKeys'
 
 const TALK_DISMISS_MS = 4000
 
 function App() {
-  const { agents, player, buildings, gridSize, talkRangeTiles, sendMove } =
+  const { agents, player, town, routes, gridSize, talkRangeTiles, sendMove, sendGoTo } =
     useGameConnection('ws://localhost:8420/ws')
-  useKeyboardMovement(sendMove)
+  const viewTurns = useViewRotation()
+  const [followTarget, setFollowTarget] = useState<string | null>(PLAYER_TARGET)
+  useFollowMeKey(() => setFollowTarget(PLAYER_TARGET))
+  const [zoomLevel, setZoomLevel] = useState(0)
+  const zoomIn = () => setZoomLevel((level) => Math.min(ZOOM_MAX_LEVEL, level + 1))
+  const zoomOut = () => setZoomLevel((level) => Math.max(ZOOM_MIN_LEVEL, level - 1))
+  useZoomKeys(zoomIn, zoomOut)
+  useKeyboardMovement((key) => sendMove(gridDirectionForKey(key, viewTurns)))
   const devMode = useDevModeToggle()
 
   const [talkingVillagerId, setTalkingVillagerId] = useState<string | null>(null)
@@ -40,19 +54,35 @@ function App() {
   const talkingVillager =
     agents.find((villager) => villager.id === talkingVillagerId) ?? null
 
+  const places = [...town].sort((a, b) => a.name.localeCompare(b.name))
+
   if (!gridSize) return null
 
   return (
-    <AgentScene
-      agents={agents}
-      player={player}
-      buildings={buildings}
-      gridWidth={gridSize.width}
-      gridHeight={gridSize.height}
-      showGridLines={devMode}
-      nearbyVillager={talkingVillager ? null : nearbyVillager}
-      talkingVillager={talkingVillager}
-    />
+    <div style={{ position: 'relative' }}>
+      <AgentScene
+        agents={agents}
+        player={player}
+        town={town}
+        gridWidth={gridSize.width}
+        gridHeight={gridSize.height}
+        showGridLines={devMode}
+        nearbyVillager={talkingVillager ? null : nearbyVillager}
+        talkingVillager={talkingVillager}
+        routes={routes}
+        showRoutes={devMode}
+        viewTurns={viewTurns}
+        followTarget={followTarget}
+        onFollowChange={setFollowTarget}
+        zoomLevel={zoomLevel}
+        showPerformance={devMode}
+      />
+      <CameraPicker villagers={agents} followTarget={followTarget} onChange={setFollowTarget} />
+      <ZoomControls level={zoomLevel} onZoomIn={zoomIn} onZoomOut={zoomOut} />
+      {devMode && (
+        <DevPanel villagers={agents} places={places} routes={routes} onGoTo={sendGoTo} />
+      )}
+    </div>
   )
 }
 
